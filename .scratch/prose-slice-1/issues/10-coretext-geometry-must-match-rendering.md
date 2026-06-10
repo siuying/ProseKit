@@ -1,6 +1,6 @@
 # 10 — Geometry must come from CoreText, not a fixed character grid
 
-Status: ready-for-agent
+Status: done
 
 ## Problem
 
@@ -55,3 +55,14 @@ The real CoreText typesetting layer the slice README promises:
 
 - 03 — Caret placement & range selection
 - 05 — Inline marks: bold / italic / code
+
+## Comments
+
+2026-06-10: Done. Blocks are typeset with CTTypesetter from a shared
+BlockStyle attributed string (CTFont per mark set); LineFragments carry their
+CTLine, GeometryMapper answers caret/hit-test/selection via
+CTLineGetOffsetForStringIndex / CTLineGetStringIndexForPosition (UTF-16 ↔
+Character conversion handled), and ProseView.draw draws the stored lines —
+one typesetting source of truth. IncrementalLayoutStore reuse now shifts
+fragment frames and position ranges when earlier blocks change. characterWidth
+is gone. Covered by GeometryTests/LayoutTests/EditorStateTests on macOS.

@@ -20,7 +20,7 @@ import UIKit
     private var state: EditorState
     private var layoutStore: IncrementalLayoutStore
     private var layoutBox: LayoutBox?
-    private let geometryMapper = GeometryMapper(characterWidth: 10)
+    private let geometryMapper = GeometryMapper()
     private lazy var proseTokenizer = UITextInputStringTokenizer(textInput: self)
     private var caretTimer: Timer?
     private var showsCaret = true
@@ -44,12 +44,18 @@ import UIKit
     }
 
     public override func draw(_ rect: CGRect) {
-        guard let layoutBox else { return }
-        UIColor.label.setFill()
+        guard let layoutBox, let context = UIGraphicsGetCurrentContext() else { return }
         drawSelectionIfNeeded()
+        context.saveGState()
+        // CoreText draws in a bottom-left coordinate space; flip to UIKit's.
+        context.textMatrix = .identity
+        context.translateBy(x: 0, y: bounds.height)
+        context.scaleBy(x: 1, y: -1)
+        context.setFillColor(UIColor.label.cgColor)
         for box in layoutBox.children {
-            draw(block: box)
+            draw(block: box, in: context)
         }
+        context.restoreGState()
         drawCaretIfNeeded()
     }
 
@@ -59,8 +65,13 @@ import UIKit
         layoutBox = try? layoutStore.layout(state.document)
     }
 
-    private func draw(block: LayoutBox) {
-        attributedString(for: block.node).draw(in: block.frame)
+    private func draw(block: LayoutBox, in context: CGContext) {
+        for fragment in block.lineFragments {
+            guard let typeset = fragment.typesetLine else { continue }
+            let baseline = fragment.frame.minY + typeset.ascent
+            context.textPosition = CGPoint(x: fragment.frame.minX, y: bounds.height - baseline)
+            CTLineDraw(typeset.line, context)
+        }
     }
 
     public override var canBecomeFirstResponder: Bool { true }
@@ -314,31 +325,5 @@ import UIKit
         runCommand(Commands.toggleMark(.italic))
     }
 
-    private func attributedString(for block: Node) -> NSAttributedString {
-        let result = NSMutableAttributedString()
-        for inline in block.content {
-            let size: CGFloat = block.type == "heading" ? 28 : 17
-            var traits: UIFontDescriptor.SymbolicTraits = []
-            if inline.marks.contains(.bold) || block.type == "heading" {
-                traits.insert(.traitBold)
-            }
-            if inline.marks.contains(.italic) {
-                traits.insert(.traitItalic)
-            }
-            let baseFont = inline.marks.contains(.code)
-                ? UIFont.monospacedSystemFont(ofSize: size, weight: .regular)
-                : UIFont.systemFont(ofSize: size)
-            let descriptor = baseFont.fontDescriptor.withSymbolicTraits(traits) ?? baseFont.fontDescriptor
-            let font = UIFont(descriptor: descriptor, size: size)
-            result.append(NSAttributedString(
-                string: inline.text ?? "",
-                attributes: [
-                    .font: font,
-                    .foregroundColor: UIColor.label,
-                ]
-            ))
-        }
-        return result
-    }
 }
 #endif
