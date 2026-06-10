@@ -7,11 +7,13 @@ public struct LineFragment: Equatable, Sendable {
     public var text: String
     public var frame: CGRect
     public var typographicHeight: CGFloat
+    public var positionRange: Range<Position>
 
-    public init(text: String, frame: CGRect, typographicHeight: CGFloat) {
+    public init(text: String, frame: CGRect, typographicHeight: CGFloat, positionRange: Range<Position> = 0..<0) {
         self.text = text
         self.frame = frame
         self.typographicHeight = typographicHeight
+        self.positionRange = positionRange
     }
 }
 
@@ -50,9 +52,11 @@ public struct LayoutBox: Equatable, Sendable {
 
 public struct LayoutEngine: Sendable {
     public var schema: Schema
+    public var characterWidth: CGFloat
 
-    public init(schema: Schema) {
+    public init(schema: Schema, characterWidth: CGFloat = 10) {
         self.schema = schema
+        self.characterWidth = characterWidth
     }
 
     public func layout(_ document: Document, width: CGFloat) throws -> LayoutBox {
@@ -79,16 +83,20 @@ public struct LayoutEngine: Sendable {
         let text = block.content.compactMap(\.text).joined()
         let fontSize: CGFloat = block.type == "heading" ? 28 : 17
         let lineHeight = ceil(fontSize * 1.25)
-        let fragment = LineFragment(
+        let fragments = makeLineFragments(
             text: text,
-            frame: CGRect(x: 0, y: y, width: width, height: lineHeight),
-            typographicHeight: lineHeight
+            textStart: position + 1,
+            y: y,
+            width: width,
+            lineHeight: lineHeight,
+            characterWidth: characterWidth
         )
+        let height = fragments.last?.frame.maxY ?? y
         return LayoutBox(
             kind: .leafBlock,
             node: block,
-            frame: CGRect(x: 0, y: y, width: width, height: lineHeight),
-            lineFragments: [fragment],
+            frame: CGRect(x: 0, y: y, width: width, height: height - y),
+            lineFragments: fragments,
             positionRange: position..<(position + block.nodeSize),
             typesetID: typesetID
         )
@@ -168,18 +176,53 @@ private func layoutLeafBlockForStore(
     let text = block.content.compactMap(\.text).joined()
     let fontSize: CGFloat = block.type == "heading" ? 28 : 17
     let lineHeight = ceil(fontSize * 1.25)
+    let fragments = makeLineFragments(
+        text: text,
+        textStart: positionRange.lowerBound + 1,
+        y: y,
+        width: width,
+        lineHeight: lineHeight,
+        characterWidth: 10
+    )
     return LayoutBox(
         kind: .leafBlock,
         node: block,
-        frame: CGRect(x: 0, y: y, width: width, height: lineHeight),
-        lineFragments: [
-            LineFragment(
-                text: text,
-                frame: CGRect(x: 0, y: y, width: width, height: lineHeight),
-                typographicHeight: lineHeight
-            ),
-        ],
+        frame: CGRect(x: 0, y: y, width: width, height: (fragments.last?.frame.maxY ?? y) - y),
+        lineFragments: fragments,
         positionRange: positionRange,
         typesetID: typesetID
     )
+}
+
+private func makeLineFragments(
+    text: String,
+    textStart: Position,
+    y: CGFloat,
+    width: CGFloat,
+    lineHeight: CGFloat,
+    characterWidth: CGFloat
+) -> [LineFragment] {
+    let characters = Array(text)
+    let capacity = max(1, Int(width / characterWidth))
+    guard !characters.isEmpty else {
+        return [
+            LineFragment(
+                text: "",
+                frame: CGRect(x: 0, y: y, width: width, height: lineHeight),
+                typographicHeight: lineHeight,
+                positionRange: textStart..<textStart
+            ),
+        ]
+    }
+
+    return stride(from: 0, to: characters.count, by: capacity).map { start in
+        let end = min(start + capacity, characters.count)
+        let lineIndex = start / capacity
+        return LineFragment(
+            text: String(characters[start..<end]),
+            frame: CGRect(x: 0, y: y + CGFloat(lineIndex) * lineHeight, width: width, height: lineHeight),
+            typographicHeight: lineHeight,
+            positionRange: (textStart + start)..<(textStart + end)
+        )
+    }
 }

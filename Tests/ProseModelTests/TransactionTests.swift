@@ -18,4 +18,11 @@ final class TransactionTests: XCTestCase {
         XCTAssertEqual(applied.selection, TextSelection(anchor: 8, head: 8))
         XCTAssertEqual(applied.origin, .local)
     }
+
+    func testSelectionMapsAcrossReplacement() {
+        let selection = TextSelection(anchor: 4, head: 7)
+        let mapping = Mapping([ReplaceStep(from: 3, to: 3, insertText: "XX")])
+
+        XCTAssertEqual(selection.mapped(through: mapping), TextSelection(anchor: 6, head: 9))
+    }
 }
