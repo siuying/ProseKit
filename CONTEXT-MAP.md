@@ -4,5 +4,5 @@ This is a multi-context repo. Each context has its own `CONTEXT.md` and `docs/ad
 
 ## Contexts
 
-<!-- Add entries as contexts are created, e.g.: -->
-<!-- - [ordering](src/ordering/CONTEXT.md) -->
+- [Prose](./CONTEXT.md) — native iOS rich-text editor: ProseMirror-style document
+  model (`ProseModel`) rendered by a custom CoreText layout engine (`ProseEditor`).
