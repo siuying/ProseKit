@@ -47,4 +47,10 @@ public struct EditorState: Sendable {
         selection = applied.selection
         dispatchedTransactions.append(applied)
     }
+
+    public mutating func replaceDocument(_ document: Document, selection: TextSelection, origin: Origin = .local) {
+        self.document = document
+        self.selection = selection
+        dispatchedTransactions.append(AppliedTransaction(document: document, selection: selection, origin: origin))
+    }
 }
