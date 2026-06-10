@@ -14,7 +14,12 @@ struct ProseExampleApp: App {
 
 private struct ProseDocumentView: UIViewRepresentable {
     func makeUIView(context: Context) -> ProseView {
-        ProseView(document: Self.document)
+        let view = ProseView(document: Self.document)
+        // Focus once on launch so the system caret is visible immediately.
+        DispatchQueue.main.async {
+            _ = view.becomeFirstResponder()
+        }
+        return view
     }
 
     func updateUIView(_ uiView: ProseView, context: Context) {
