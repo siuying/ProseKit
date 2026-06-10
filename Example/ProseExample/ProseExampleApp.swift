@@ -18,7 +18,8 @@ private struct ProseDocumentView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: ProseView, context: Context) {
-        uiView.document = Self.document
+        // Reassigning `document` rebuilds EditorState, discarding the user's
+        // edits and selection — the sample document is set once in makeUIView.
     }
 
     private static let document: Document = {

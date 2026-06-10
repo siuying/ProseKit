@@ -28,6 +28,13 @@ public struct Node: Codable, Hashable, Sendable {
         return 2 + content.reduce(0) { $0 + $1.nodeSize }
     }
 
+    public var plainText: String {
+        if isText {
+            return text ?? ""
+        }
+        return content.map(\.plainText).joined()
+    }
+
     public static func doc(_ content: [Node]) -> Node {
         Node(type: "doc", content: content)
     }
@@ -42,6 +49,18 @@ public struct Node: Codable, Hashable, Sendable {
 
     public static func text(_ text: String, marks: [Mark] = []) -> Node {
         Node(type: "text", text: text, marks: marks)
+    }
+
+    public func withContent(_ content: [Node]) -> Node {
+        Node(type: type, attrs: attrs, content: content, text: text, marks: marks)
+    }
+
+    public func asParagraph() -> Node {
+        Node(type: "paragraph", content: content)
+    }
+
+    public func asHeading(level: Int) -> Node {
+        Node(type: "heading", attrs: ["level": .int(level)], content: content)
     }
 
     private enum CodingKeys: String, CodingKey {

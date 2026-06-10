@@ -20,7 +20,7 @@ import UIKit
     private var state: EditorState
     private var layoutStore: IncrementalLayoutStore
     private var layoutBox: LayoutBox?
-    private let geometryMapper = GeometryMapper(characterWidth: 10)
+    private let geometryMapper = GeometryMapper()
     private lazy var proseTokenizer = UITextInputStringTokenizer(textInput: self)
     private var caretTimer: Timer?
     private var showsCaret = true
@@ -44,12 +44,18 @@ import UIKit
     }
 
     public override func draw(_ rect: CGRect) {
-        guard let layoutBox else { return }
-        UIColor.label.setFill()
+        guard let layoutBox, let context = UIGraphicsGetCurrentContext() else { return }
         drawSelectionIfNeeded()
+        context.saveGState()
+        // CoreText draws in a bottom-left coordinate space; flip to UIKit's.
+        context.textMatrix = .identity
+        context.translateBy(x: 0, y: bounds.height)
+        context.scaleBy(x: 1, y: -1)
+        context.setFillColor(UIColor.label.cgColor)
         for box in layoutBox.children {
-            draw(block: box)
+            draw(block: box, in: context)
         }
+        context.restoreGState()
         drawCaretIfNeeded()
     }
 
@@ -59,15 +65,13 @@ import UIKit
         layoutBox = try? layoutStore.layout(state.document)
     }
 
-    private func draw(block: LayoutBox) {
-        let text = block.lineFragments.first?.text ?? ""
-        let size: CGFloat = block.node.type == "heading" ? 28 : 17
-        let weight: UIFont.Weight = block.node.type == "heading" ? .bold : .regular
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: UIFont.systemFont(ofSize: size, weight: weight),
-            .foregroundColor: UIColor.label,
-        ]
-        text.draw(in: block.frame, withAttributes: attributes)
+    private func draw(block: LayoutBox, in context: CGContext) {
+        for fragment in block.lineFragments {
+            guard let typeset = fragment.typesetLine else { continue }
+            let baseline = fragment.frame.minY + typeset.ascent
+            context.textPosition = CGPoint(x: fragment.frame.minX, y: bounds.height - baseline)
+            CTLineDraw(typeset.line, context)
+        }
     }
 
     public override var canBecomeFirstResponder: Bool { true }
@@ -105,6 +109,10 @@ import UIKit
     }
 
     public func insertText(_ text: String) {
+        if text == "\n" {
+            runCommand(Commands.splitBlock())
+            return
+        }
         inputDelegate?.textWillChange(self)
         try? state.insertText(text)
         relayout()
@@ -113,6 +121,11 @@ import UIKit
     }
 
     public func deleteBackward() {
+        if (try? Commands.joinBackward().run(in: &state)) == true {
+            relayout()
+            setNeedsDisplay()
+            return
+        }
         inputDelegate?.textWillChange(self)
         try? state.deleteBackward()
         relayout()
@@ -252,6 +265,82 @@ import UIKit
         return ProseTextRange(anchor: position.position, head: clamp(position.position + 1))
     }
 
+    public func toggleHeading(level: Int = 1) {
+        runCommand(Commands.toggleHeading(level: level))
+    }
+
+    public func toggleCode() {
+        runCommand(Commands.toggleMark(.code))
+    }
+
+    public override var keyCommands: [UIKeyCommand]? {
+        let commands = [
+            UIKeyCommand(input: "b", modifierFlags: .command, action: #selector(toggleBoldFromKeyCommand)),
+            UIKeyCommand(input: "i", modifierFlags: .command, action: #selector(toggleItalicFromKeyCommand)),
+        ]
+        // Without priority, the system routes ⌘B/⌘I to the standard edit
+        // actions instead of these commands.
+        for command in commands {
+            command.wantsPriorityOverSystemBehavior = true
+        }
+        return commands
+    }
+
+    public override func toggleBoldface(_ sender: Any?) {
+        runCommand(Commands.toggleMark(.bold))
+    }
+
+    public override func toggleItalics(_ sender: Any?) {
+        runCommand(Commands.toggleMark(.italic))
+    }
+
+    public override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        guard let key = presses.first?.key, let direction = CaretDirection(key: key) else {
+            super.pressesBegan(presses, with: event)
+            return
+        }
+        moveCaret(direction, extending: key.modifierFlags.contains(.shift))
+    }
+
+    private enum CaretDirection {
+        case left, right, up, down
+
+        init?(key: UIKey) {
+            switch key.keyCode {
+            case .keyboardLeftArrow: self = .left
+            case .keyboardRightArrow: self = .right
+            case .keyboardUpArrow: self = .up
+            case .keyboardDownArrow: self = .down
+            default: return nil
+            }
+        }
+    }
+
+    private func moveCaret(_ direction: CaretDirection, extending: Bool) {
+        guard let layoutBox else { return }
+        let selection = state.selection
+
+        if !extending, !selection.isCollapsed, direction == .left || direction == .right {
+            // A plain horizontal arrow collapses the selection to its edge.
+            let edge = direction == .left
+                ? min(selection.anchor, selection.head)
+                : max(selection.anchor, selection.head)
+            showsCaret = true
+            selectedTextRange = ProseTextRange(anchor: edge, head: edge)
+            return
+        }
+
+        let head: Position
+        switch direction {
+        case .left: head = geometryMapper.position(before: selection.head, in: layoutBox)
+        case .right: head = geometryMapper.position(after: selection.head, in: layoutBox)
+        case .up: head = geometryMapper.position(above: selection.head, in: layoutBox)
+        case .down: head = geometryMapper.position(below: selection.head, in: layoutBox)
+        }
+        showsCaret = true
+        selectedTextRange = ProseTextRange(anchor: extending ? selection.anchor : head, head: head)
+    }
+
     private func drawCaretIfNeeded() {
         guard isFirstResponder, showsCaret, state.selection.isCollapsed else { return }
         let rect = caretRect(for: ProseTextPosition(state.selection.head))
@@ -280,5 +369,22 @@ import UIKit
             }
         }
     }
+
+    private func runCommand(_ command: Command) {
+        inputDelegate?.textWillChange(self)
+        _ = try? command.run(in: &state)
+        relayout()
+        setNeedsDisplay()
+        inputDelegate?.textDidChange(self)
+    }
+
+    @objc private func toggleBoldFromKeyCommand() {
+        runCommand(Commands.toggleMark(.bold))
+    }
+
+    @objc private func toggleItalicFromKeyCommand() {
+        runCommand(Commands.toggleMark(.italic))
+    }
+
 }
 #endif

@@ -5,21 +5,29 @@ public struct EditorState: Sendable {
     public private(set) var document: Document
     public private(set) var selection: TextSelection
     public private(set) var dispatchedTransactions: [AppliedTransaction]
+    public private(set) var typingMarks: [Mark]
 
     public init(
         document: Document,
         selection: TextSelection? = nil,
-        dispatchedTransactions: [AppliedTransaction] = []
+        dispatchedTransactions: [AppliedTransaction] = [],
+        typingMarks: [Mark] = []
     ) {
         self.document = document
         self.selection = selection ?? TextSelection(anchor: document.endTextPosition, head: document.endTextPosition)
         self.dispatchedTransactions = dispatchedTransactions
+        self.typingMarks = typingMarks
     }
 
     public mutating func insertText(_ text: String) throws {
         let from = min(selection.anchor, selection.head)
         let to = max(selection.anchor, selection.head)
         let head = from + text.count
+        if !typingMarks.isEmpty, from == to {
+            let updated = try document.replacingText(from: from, to: to, with: text, marks: typingMarks)
+            replaceDocument(updated, selection: TextSelection(anchor: head, head: head))
+            return
+        }
         try dispatch(Transaction(
             steps: [ReplaceStep(from: from, to: to, insertText: text)],
             selection: TextSelection(anchor: head, head: head),
@@ -46,5 +54,19 @@ public struct EditorState: Sendable {
         document = applied.document
         selection = applied.selection
         dispatchedTransactions.append(applied)
+    }
+
+    public mutating func replaceDocument(_ document: Document, selection: TextSelection, origin: Origin = .local) {
+        self.document = document
+        self.selection = selection
+        dispatchedTransactions.append(AppliedTransaction(document: document, selection: selection, origin: origin))
+    }
+
+    public mutating func toggleTypingMark(_ mark: Mark) {
+        if typingMarks.contains(mark) {
+            typingMarks.removeAll { $0 == mark }
+        } else {
+            typingMarks.append(mark)
+        }
     }
 }
