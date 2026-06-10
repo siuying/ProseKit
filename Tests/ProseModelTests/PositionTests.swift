@@ -11,6 +11,7 @@ final class PositionTests: XCTestCase {
         XCTAssertEqual(document.position(ofBlockAt: 1), 8)
         XCTAssertEqual(document.position(ofTextInBlockAt: 1), 9)
         XCTAssertEqual(document.endPosition, 15)
+        XCTAssertEqual(document.endTextPosition, 14)
     }
 }
 
