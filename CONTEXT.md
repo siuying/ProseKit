@@ -41,6 +41,14 @@ The smallest first-class, invertible, serializable change to a Document (e.g.
 `ReplaceStep`, `AddMarkStep`). Applying a Step to a Document yields a new Document.
 _Avoid_: edit, mutation, operation, command (a Command produces Steps)
 
+**Slice**:
+A contiguous fragment of a **Document** cut between two **Positions**, carrying
+its content plus how deeply its start and end are open (cut mid-Node), so it can
+be fitted into another place in a Document. The unit of copy/paste and of
+replace-range edits.
+_Avoid_: snippet, fragment (a Slice's content is a fragment; the Slice also
+carries the open depths), clipboard contents
+
 **Transaction**:
 An ordered batch of **Steps** applied atomically, plus the resulting Selection.
 The only sanctioned way to change the editor's Document.
