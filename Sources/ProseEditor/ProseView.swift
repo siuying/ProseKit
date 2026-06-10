@@ -105,6 +105,10 @@ import UIKit
     }
 
     public func insertText(_ text: String) {
+        if text == "\n" {
+            runCommand(Commands.splitBlock())
+            return
+        }
         inputDelegate?.textWillChange(self)
         try? state.insertText(text)
         relayout()
@@ -113,6 +117,11 @@ import UIKit
     }
 
     public func deleteBackward() {
+        if (try? Commands.joinBackward().run(in: &state)) == true {
+            relayout()
+            setNeedsDisplay()
+            return
+        }
         inputDelegate?.textWillChange(self)
         try? state.deleteBackward()
         relayout()
@@ -252,6 +261,10 @@ import UIKit
         return ProseTextRange(anchor: position.position, head: clamp(position.position + 1))
     }
 
+    public func toggleHeading(level: Int = 1) {
+        runCommand(Commands.toggleHeading(level: level))
+    }
+
     private func drawCaretIfNeeded() {
         guard isFirstResponder, showsCaret, state.selection.isCollapsed else { return }
         let rect = caretRect(for: ProseTextPosition(state.selection.head))
@@ -279,6 +292,14 @@ import UIKit
                 self?.setNeedsDisplay()
             }
         }
+    }
+
+    private func runCommand(_ command: Command) {
+        inputDelegate?.textWillChange(self)
+        _ = try? command.run(in: &state)
+        relayout()
+        setNeedsDisplay()
+        inputDelegate?.textDidChange(self)
     }
 }
 #endif

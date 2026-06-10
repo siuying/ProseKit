@@ -38,6 +38,72 @@ public struct Document: Codable, Hashable, Sendable {
         root.plainText
     }
 
+    public func containsText(_ needle: String) -> Bool {
+        root.containsText(needle)
+    }
+
+    public func blockInfo(containing position: Position) -> BlockInfo? {
+        var start = 1
+        for (index, block) in root.content.enumerated() {
+            let end = start + block.nodeSize
+            if position >= start, position <= end {
+                return BlockInfo(index: index, node: block, start: start)
+            }
+            start = end
+        }
+        return nil
+    }
+
+    public func splitBlock(at position: Position) throws -> (Document, TextSelection) {
+        guard let info = blockInfo(containing: position),
+              info.node.type == "paragraph" || info.node.type == "heading" else {
+            throw StepError.unsupportedReplacement("splitBlock requires a text block")
+        }
+        let textStart = info.start + 1
+        let offset = max(0, min(info.node.plainText.count, position - textStart))
+        let text = info.node.plainText
+        let splitIndex = text.index(text.startIndex, offsetBy: offset)
+        let before = String(text[..<splitIndex])
+        let after = String(text[splitIndex...])
+        let first = info.node.withContent([.text(before)])
+        let second = info.node.withContent([.text(after)])
+        var blocks = root.content
+        blocks.replaceSubrange(info.index...info.index, with: [first, second])
+        let newBlockStart = info.start + first.nodeSize
+        return (Document(.doc(blocks)), TextSelection(anchor: newBlockStart + 1, head: newBlockStart + 1))
+    }
+
+    public func joinBackward(at position: Position) throws -> (Document, TextSelection)? {
+        guard let info = blockInfo(containing: position), info.index > 0, position == info.start + 1 else {
+            return nil
+        }
+        var blocks = root.content
+        let previous = blocks[info.index - 1]
+        let current = blocks[info.index]
+        let previousTextEnd = info.start - 1
+
+        if current.plainText.isEmpty {
+            blocks.remove(at: info.index)
+        } else {
+            blocks[info.index - 1] = previous.withContent([.text(previous.plainText + current.plainText)])
+            blocks.remove(at: info.index)
+        }
+
+        return (
+            Document(.doc(blocks)),
+            TextSelection(anchor: previousTextEnd, head: previousTextEnd)
+        )
+    }
+
+    public func togglingHeading(at position: Position, level: Int) throws -> (Document, TextSelection) {
+        guard let info = blockInfo(containing: position) else {
+            throw StepError.unsupportedReplacement("toggleHeading requires a text block")
+        }
+        var blocks = root.content
+        blocks[info.index] = info.node.type == "heading" ? info.node.asParagraph() : info.node.asHeading(level: level)
+        return (Document(.doc(blocks)), TextSelection(anchor: position, head: position))
+    }
+
     public func text(from: Position, to: Position) throws -> String {
         guard from <= to else {
             throw StepError.unsupportedReplacement("replacement range must be ordered")
@@ -79,12 +145,24 @@ private struct TextRange {
     var range: Range<String.Index>
 }
 
+public struct BlockInfo: Equatable, Sendable {
+    public var index: Int
+    public var node: Node
+    public var start: Position
+
+    public init(index: Int, node: Node, start: Position) {
+        self.index = index
+        self.node = node
+        self.start = start
+    }
+}
+
 private extension Node {
-    var plainText: String {
+    func containsText(_ needle: String) -> Bool {
         if isText {
-            return text ?? ""
+            return text?.contains(needle) ?? false
         }
-        return content.map(\.plainText).joined()
+        return content.contains { $0.containsText(needle) }
     }
 
     func walkTextNodes(start: Position, path: [Int], visit: ([Int], Position, String) -> Void) {
