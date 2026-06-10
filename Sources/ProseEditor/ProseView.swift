@@ -60,14 +60,7 @@ import UIKit
     }
 
     private func draw(block: LayoutBox) {
-        let text = block.lineFragments.first?.text ?? ""
-        let size: CGFloat = block.node.type == "heading" ? 28 : 17
-        let weight: UIFont.Weight = block.node.type == "heading" ? .bold : .regular
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: UIFont.systemFont(ofSize: size, weight: weight),
-            .foregroundColor: UIColor.label,
-        ]
-        text.draw(in: block.frame, withAttributes: attributes)
+        attributedString(for: block.node).draw(in: block.frame)
     }
 
     public override var canBecomeFirstResponder: Bool { true }
@@ -265,6 +258,17 @@ import UIKit
         runCommand(Commands.toggleHeading(level: level))
     }
 
+    public func toggleCode() {
+        runCommand(Commands.toggleMark(.code))
+    }
+
+    public override var keyCommands: [UIKeyCommand]? {
+        [
+            UIKeyCommand(input: "b", modifierFlags: .command, action: #selector(toggleBoldFromKeyCommand)),
+            UIKeyCommand(input: "i", modifierFlags: .command, action: #selector(toggleItalicFromKeyCommand)),
+        ]
+    }
+
     private func drawCaretIfNeeded() {
         guard isFirstResponder, showsCaret, state.selection.isCollapsed else { return }
         let rect = caretRect(for: ProseTextPosition(state.selection.head))
@@ -300,6 +304,41 @@ import UIKit
         relayout()
         setNeedsDisplay()
         inputDelegate?.textDidChange(self)
+    }
+
+    @objc private func toggleBoldFromKeyCommand() {
+        runCommand(Commands.toggleMark(.bold))
+    }
+
+    @objc private func toggleItalicFromKeyCommand() {
+        runCommand(Commands.toggleMark(.italic))
+    }
+
+    private func attributedString(for block: Node) -> NSAttributedString {
+        let result = NSMutableAttributedString()
+        for inline in block.content {
+            let size: CGFloat = block.type == "heading" ? 28 : 17
+            var traits: UIFontDescriptor.SymbolicTraits = []
+            if inline.marks.contains(.bold) || block.type == "heading" {
+                traits.insert(.traitBold)
+            }
+            if inline.marks.contains(.italic) {
+                traits.insert(.traitItalic)
+            }
+            let baseFont = inline.marks.contains(.code)
+                ? UIFont.monospacedSystemFont(ofSize: size, weight: .regular)
+                : UIFont.systemFont(ofSize: size)
+            let descriptor = baseFont.fontDescriptor.withSymbolicTraits(traits) ?? baseFont.fontDescriptor
+            let font = UIFont(descriptor: descriptor, size: size)
+            result.append(NSAttributedString(
+                string: inline.text ?? "",
+                attributes: [
+                    .font: font,
+                    .foregroundColor: UIColor.label,
+                ]
+            ))
+        }
+        return result
     }
 }
 #endif

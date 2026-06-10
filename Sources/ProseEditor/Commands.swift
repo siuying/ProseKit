@@ -40,4 +40,21 @@ public enum Commands {
             return true
         }
     }
+
+    public static func toggleMark(_ mark: Mark) -> Command {
+        Command { state in
+            let lower = min(state.selection.anchor, state.selection.head)
+            let upper = max(state.selection.anchor, state.selection.head)
+            guard lower < upper else {
+                state.toggleTypingMark(mark)
+                return true
+            }
+
+            let document = state.document.rangeHasMark(from: lower, to: upper, mark: mark)
+                ? try state.document.removingMark(from: lower, to: upper, mark: mark)
+                : try state.document.addingMark(from: lower, to: upper, mark: mark)
+            state.replaceDocument(document, selection: state.selection)
+            return true
+        }
+    }
 }

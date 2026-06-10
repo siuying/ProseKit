@@ -57,4 +57,28 @@ final class CommandTests: XCTestCase {
         XCTAssertEqual(state.document.root.content[0].type, "paragraph")
         XCTAssertEqual(state.document.root.content[0].plainText, "hello")
     }
+
+    func testToggleMarkAddsAndRemovesBasedOnWholeSelection() throws {
+        var state = EditorState(document: Document(.doc([
+            .paragraph([.text("hello")]),
+        ])), selection: TextSelection(anchor: 2, head: 7))
+
+        XCTAssertTrue(try Commands.toggleMark(.bold).run(in: &state))
+        XCTAssertEqual(state.document.root.content[0].content[0].marks, [.bold])
+
+        XCTAssertTrue(try Commands.toggleMark(.bold).run(in: &state))
+        XCTAssertEqual(state.document.root.content[0].content[0].marks, [])
+    }
+
+    func testCollapsedToggleMarkAppliesToNextInsertedText() throws {
+        var state = EditorState(document: Document(.doc([
+            .paragraph([.text("hi")]),
+        ])), selection: TextSelection(anchor: 4, head: 4))
+
+        XCTAssertTrue(try Commands.toggleMark(.code).run(in: &state))
+        try state.insertText("!")
+
+        XCTAssertEqual(state.document.root.content[0].content[1].text, "!")
+        XCTAssertEqual(state.document.root.content[0].content[1].marks, [.code])
+    }
 }

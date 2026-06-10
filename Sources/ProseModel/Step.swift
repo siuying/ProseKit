@@ -59,3 +59,43 @@ public enum StepError: Error, Equatable, CustomStringConvertible {
         }
     }
 }
+
+public struct AddMarkStep: Codable, Equatable, Sendable {
+    public var from: Position
+    public var to: Position
+    public var mark: Mark
+
+    public init(from: Position, to: Position, mark: Mark) {
+        self.from = from
+        self.to = to
+        self.mark = mark
+    }
+
+    public func apply(to document: Document) throws -> StepApplication {
+        StepApplication(document: try document.addingMark(from: from, to: to, mark: mark), changedRange: from..<to)
+    }
+
+    public func inverted(in document: Document) throws -> RemoveMarkStep {
+        RemoveMarkStep(from: from, to: to, mark: mark)
+    }
+}
+
+public struct RemoveMarkStep: Codable, Equatable, Sendable {
+    public var from: Position
+    public var to: Position
+    public var mark: Mark
+
+    public init(from: Position, to: Position, mark: Mark) {
+        self.from = from
+        self.to = to
+        self.mark = mark
+    }
+
+    public func apply(to document: Document) throws -> StepApplication {
+        StepApplication(document: try document.removingMark(from: from, to: to, mark: mark), changedRange: from..<to)
+    }
+
+    public func inverted(in document: Document) throws -> AddMarkStep {
+        AddMarkStep(from: from, to: to, mark: mark)
+    }
+}
