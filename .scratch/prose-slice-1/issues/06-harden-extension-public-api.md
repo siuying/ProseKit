@@ -33,3 +33,13 @@ Extension reaches editor state in a Command.
 
 - 04 — Multi-block structural editing
 - 05 — Inline marks: bold / italic / code
+- 09 — Hardware keyboard: caret movement & reliable ⌘B/⌘I
+- 10 — Geometry must come from CoreText, not a fixed character grid
+- 11 — Example app wipes editor state on every SwiftUI update
+
+## Comments
+
+2026-06-10: Re-blocked after user testing found the editor unusable (no arrow
+keys, broken selection geometry, ⌘B inert). The Extension API review needs a
+working editor to evaluate keymap entries and Render Hooks against — 09–11
+must land first.

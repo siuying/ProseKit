@@ -33,3 +33,12 @@ explicitly out of scope (later polish).
 ## Blocked by
 
 - 02 — Type into a paragraph
+
+## Comments
+
+2026-06-10: User testing found selection non-functional on screen. The
+acceptance criteria pass only against the stub geometry: `GeometryMapper` and
+the layout's `LineFragment`s use a fixed 10pt character grid, while drawing
+uses real proportional fonts — so taps, caret rects, and highlights are
+self-consistent in tests but wrong relative to the rendered glyphs. Follow-up
+filed as 10 (CoreText geometry must match rendering).

@@ -32,3 +32,12 @@ This is the first slice where a single text run carries overlapping marks
 ## Blocked by
 
 - 02 — Type into a paragraph
+
+## Comments
+
+2026-06-10: User testing found ⌘B/⌘I inert in the example app. The keymap
+exists (`ProseView.keyCommands`) but UIKit routes ⌘B/⌘I on a UITextInput first
+responder to the standard `toggleBoldface(_:)`/`toggleItalics(_:)` actions,
+which ProseView doesn't implement; and with selection broken (see 03 comment /
+issue 10) a collapsed-caret toggle only sets an invisible typing mark.
+Follow-up filed as 09 (hardware keyboard: caret movement & reliable ⌘B/⌘I).
