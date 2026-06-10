@@ -114,13 +114,47 @@ public struct Document: Codable, Hashable, Sendable {
         return String(range.text[range.range])
     }
 
-    public func replacingText(from: Position, to: Position, with insertedText: String) throws -> Document {
+    public func replacingText(from: Position, to: Position, with insertedText: String, marks: [Mark] = []) throws -> Document {
         guard let range = textRange(from: from, to: to) else {
             throw StepError.unsupportedReplacement("replacement range must stay inside one text node")
+        }
+        if !marks.isEmpty, from == to, range.path.count == 2 {
+            return Document(root.replacingTextNodeWithMarkedInsertion(
+                atPath: range.path,
+                offset: range.text.distance(from: range.text.startIndex, to: range.range.lowerBound),
+                insertedText: insertedText,
+                marks: marks
+            ))
         }
         var updated = range.text
         updated.replaceSubrange(range.range, with: insertedText)
         return Document(root.replacingTextNode(atPath: range.path, with: updated))
+    }
+
+    public func addingMark(from: Position, to: Position, mark: Mark) throws -> Document {
+        try settingMark(from: from, to: to, mark: mark, enabled: true)
+    }
+
+    public func removingMark(from: Position, to: Position, mark: Mark) throws -> Document {
+        try settingMark(from: from, to: to, mark: mark, enabled: false)
+    }
+
+    public func rangeHasMark(from: Position, to: Position, mark: Mark) -> Bool {
+        guard let range = textRange(from: from, to: to) else { return false }
+        return root.textNode(atPath: range.path)?.marks.contains(mark) == true
+    }
+
+    private func settingMark(from: Position, to: Position, mark: Mark, enabled: Bool) throws -> Document {
+        guard let range = textRange(from: from, to: to) else {
+            throw StepError.unsupportedReplacement("mark range must stay inside one text node")
+        }
+        return Document(root.settingMark(
+            atPath: range.path,
+            lowerOffset: range.text.distance(from: range.text.startIndex, to: range.range.lowerBound),
+            upperOffset: range.text.distance(from: range.text.startIndex, to: range.range.upperBound),
+            mark: mark,
+            enabled: enabled
+        ))
     }
 
     private func textRange(from: Position, to: Position) -> TextRange? {
@@ -191,5 +225,72 @@ private extension Node {
             with: text
         )
         return copy
+    }
+
+    func replacingTextNodeWithMarkedInsertion(atPath path: [Int], offset: Int, insertedText: String, marks: [Mark]) -> Node {
+        guard path.count == 2 else { return self }
+        var copy = self
+        let blockIndex = path[0]
+        let textIndex = path[1]
+        let original = copy.content[blockIndex].content[textIndex]
+        let text = original.text ?? ""
+        let split = text.index(text.startIndex, offsetBy: offset)
+        var replacement: [Node] = []
+        let before = String(text[..<split])
+        let after = String(text[split...])
+        if !before.isEmpty {
+            replacement.append(.text(before, marks: original.marks))
+        }
+        if !insertedText.isEmpty {
+            replacement.append(.text(insertedText, marks: marks))
+        }
+        if !after.isEmpty {
+            replacement.append(.text(after, marks: original.marks))
+        }
+        copy.content[blockIndex].content.replaceSubrange(textIndex...textIndex, with: replacement)
+        return copy
+    }
+
+    func settingMark(atPath path: [Int], lowerOffset: Int, upperOffset: Int, mark: Mark, enabled: Bool) -> Node {
+        guard path.count == 2 else { return self }
+        var copy = self
+        let blockIndex = path[0]
+        let textIndex = path[1]
+        let original = copy.content[blockIndex].content[textIndex]
+        let text = original.text ?? ""
+        let lower = text.index(text.startIndex, offsetBy: lowerOffset)
+        let upper = text.index(text.startIndex, offsetBy: upperOffset)
+        var replacement: [Node] = []
+
+        func marks(_ existing: [Mark]) -> [Mark] {
+            if enabled {
+                return existing.contains(mark) ? existing : existing + [mark]
+            }
+            return existing.filter { $0 != mark }
+        }
+
+        let before = String(text[..<lower])
+        let marked = String(text[lower..<upper])
+        let after = String(text[upper...])
+        if !before.isEmpty {
+            replacement.append(.text(before, marks: original.marks))
+        }
+        if !marked.isEmpty {
+            replacement.append(.text(marked, marks: marks(original.marks)))
+        }
+        if !after.isEmpty {
+            replacement.append(.text(after, marks: original.marks))
+        }
+        copy.content[blockIndex].content.replaceSubrange(textIndex...textIndex, with: replacement)
+        return copy
+    }
+
+    func textNode(atPath path: [Int]) -> Node? {
+        guard path.count == 2,
+              content.indices.contains(path[0]),
+              content[path[0]].content.indices.contains(path[1]) else {
+            return nil
+        }
+        return content[path[0]].content[path[1]]
     }
 }
