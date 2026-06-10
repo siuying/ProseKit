@@ -16,14 +16,15 @@ import UIKit
 
     public weak var inputDelegate: UITextInputDelegate?
     public var markedTextStyle: [NSAttributedString.Key: Any]?
+    /// The pasteboard edit-menu actions read and write. Injectable because
+    /// `UIPasteboard.general` is unavailable to unhosted test bundles.
+    public var pasteboard: UIPasteboard = .general
 
     private var state: EditorState
     private var layoutStore: IncrementalLayoutStore
     private var layoutBox: LayoutBox?
     private let geometryMapper = GeometryMapper()
     private lazy var proseTokenizer = UITextInputStringTokenizer(textInput: self)
-    private var caretTimer: Timer?
-    private var showsCaret = true
 
     public init(document: Document, schema: Schema = .slice1) {
         self.state = EditorState(document: document)
@@ -31,6 +32,11 @@ import UIKit
         super.init(frame: .zero)
         backgroundColor = .systemBackground
         contentMode = .redraw
+        // The system owns all selection chrome: caret, handles, loupe,
+        // double-tap word select, edit menu.
+        let textInteraction = UITextInteraction(for: .editable)
+        textInteraction.textInput = self
+        addInteraction(textInteraction)
     }
 
     @available(*, unavailable)
@@ -45,7 +51,6 @@ import UIKit
 
     public override func draw(_ rect: CGRect) {
         guard let layoutBox, let context = UIGraphicsGetCurrentContext() else { return }
-        drawSelectionIfNeeded()
         context.saveGState()
         // CoreText draws in a bottom-left coordinate space; flip to UIKit's.
         context.textMatrix = .identity
@@ -56,7 +61,6 @@ import UIKit
             draw(block: box, in: context)
         }
         context.restoreGState()
-        drawCaretIfNeeded()
     }
 
     private func relayout() {
@@ -79,29 +83,29 @@ import UIKit
     public override func becomeFirstResponder() -> Bool {
         let became = super.becomeFirstResponder()
         if became {
-            startCaretBlink()
+            setSelectionDisplayActivated(true)
         }
         return became
     }
 
     public override func resignFirstResponder() -> Bool {
-        caretTimer?.invalidate()
-        caretTimer = nil
-        return super.resignFirstResponder()
-    }
-
-    public override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        _ = becomeFirstResponder()
-        if let point = touches.first?.location(in: self),
-           let position = closestPosition(to: point) as? ProseTextPosition {
-            selectedTextRange = ProseTextRange(anchor: position.position, head: position.position)
+        let resigned = super.resignFirstResponder()
+        if resigned {
+            setSelectionDisplayActivated(false)
         }
+        return resigned
     }
 
-    public override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard let point = touches.first?.location(in: self),
-              let position = closestPosition(to: point) as? ProseTextPosition else { return }
-        selectedTextRange = ProseTextRange(anchor: state.selection.anchor, head: position.position)
+    /// UITextInteraction only activates its selection display from its own
+    /// tap gestures; programmatic focus must show the caret too, like
+    /// UITextView does.
+    private func setSelectionDisplayActivated(_ activated: Bool) {
+        for case let display as UITextSelectionDisplayInteraction in interactions {
+            display.isActivated = activated
+            if activated {
+                display.setNeedsSelectionUpdate()
+            }
+        }
     }
 
     public var hasText: Bool {
@@ -109,10 +113,19 @@ import UIKit
     }
 
     public func insertText(_ text: String) {
-        if text == "\n" {
-            runCommand(Commands.splitBlock())
-            return
+        // Every newline behaves like typing Return: it splits the block.
+        let segments = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        for (index, segment) in segments.enumerated() {
+            if index > 0 {
+                runCommand(Commands.splitBlock())
+            }
+            if !segment.isEmpty || segments.count == 1 {
+                insertPlainText(segment)
+            }
         }
+    }
+
+    private func insertPlainText(_ text: String) {
         inputDelegate?.textWillChange(self)
         try? state.insertText(text)
         relayout()
@@ -137,12 +150,14 @@ import UIKit
         get { ProseTextRange(anchor: state.selection.anchor, head: state.selection.head) }
         set {
             guard let range = newValue as? ProseTextRange else { return }
+            inputDelegate?.selectionWillChange(self)
             state = EditorState(
                 document: state.document,
                 selection: range.textSelection,
                 dispatchedTransactions: state.dispatchedTransactions
             )
             setNeedsDisplay()
+            inputDelegate?.selectionDidChange(self)
         }
     }
 
@@ -162,7 +177,25 @@ import UIKit
 
     public func text(in range: UITextRange) -> String? {
         guard let range = range as? ProseTextRange else { return nil }
-        return try? state.document.text(from: min(range.anchor, range.head), to: max(range.anchor, range.head))
+        return plainText(from: min(range.anchor, range.head), to: max(range.anchor, range.head))
+    }
+
+    /// Plain text between two positions; block boundaries read as "\n" so
+    /// ranges spanning blocks (Select All, tokenizer context) stay readable.
+    private func plainText(from: Position, to: Position) -> String {
+        var pieces: [String] = []
+        for (index, block) in state.document.root.content.enumerated() {
+            guard let textStart = state.document.position(ofTextInBlockAt: index) else { continue }
+            let text = block.plainText
+            let textEnd = textStart + text.count
+            guard from <= textEnd, to >= textStart else { continue }
+            let lower = max(from, textStart)
+            let upper = min(to, textEnd)
+            let start = text.index(text.startIndex, offsetBy: lower - textStart)
+            let end = text.index(text.startIndex, offsetBy: upper - textStart)
+            pieces.append(String(text[start..<end]))
+        }
+        return pieces.joined(separator: "\n")
     }
 
     public func replace(_ range: UITextRange, withText text: String) {
@@ -201,7 +234,18 @@ import UIKit
     }
 
     public func position(from position: UITextPosition, in direction: UITextLayoutDirection, offset: Int) -> UITextPosition? {
-        self.position(from: position, offset: offset)
+        guard let position = position as? ProseTextPosition, let layoutBox else { return nil }
+        var current = position.position
+        for _ in 0..<offset {
+            switch direction {
+            case .left: current = geometryMapper.position(before: current, in: layoutBox)
+            case .right: current = geometryMapper.position(after: current, in: layoutBox)
+            case .up: current = geometryMapper.position(above: current, in: layoutBox)
+            case .down: current = geometryMapper.position(below: current, in: layoutBox)
+            @unknown default: return nil
+            }
+        }
+        return ProseTextPosition(clamp(current))
     }
 
     public func compare(_ position: UITextPosition, to other: UITextPosition) -> ComparisonResult {
@@ -237,7 +281,11 @@ import UIKit
 
     public func firstRect(for range: UITextRange) -> CGRect {
         guard let range = range as? ProseTextRange else { return .zero }
-        return caretRect(for: ProseTextPosition(min(range.anchor, range.head)))
+        guard let layoutBox,
+              let first = geometryMapper.selectionRects(for: range.textSelection, in: layoutBox).first else {
+            return caretRect(for: ProseTextPosition(min(range.anchor, range.head)))
+        }
+        return first
     }
 
     public func caretRect(for position: UITextPosition) -> CGRect {
@@ -246,7 +294,15 @@ import UIKit
     }
 
     public func selectionRects(for range: UITextRange) -> [UITextSelectionRect] {
-        []
+        guard let range = range as? ProseTextRange, let layoutBox else { return [] }
+        let rects = geometryMapper.selectionRects(for: range.textSelection, in: layoutBox)
+        return rects.enumerated().map { index, rect in
+            ProseTextSelectionRect(
+                rect: rect,
+                containsStart: index == 0,
+                containsEnd: index == rects.count - 1
+            )
+        }
     }
 
     public func closestPosition(to point: CGPoint) -> UITextPosition? {
@@ -273,6 +329,50 @@ import UIKit
         runCommand(Commands.toggleMark(.code))
     }
 
+    public override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        switch action {
+        case #selector(copy(_:)), #selector(cut(_:)):
+            return !state.selection.isCollapsed
+        case #selector(paste(_:)):
+            return pasteboard.hasStrings
+        case #selector(select(_:)), #selector(selectAll(_:)):
+            return hasText
+        default:
+            return super.canPerformAction(action, withSender: sender)
+        }
+    }
+
+    public override func copy(_ sender: Any?) {
+        guard let selectedTextRange, let text = text(in: selectedTextRange) else { return }
+        pasteboard.string = text
+    }
+
+    public override func cut(_ sender: Any?) {
+        guard let selectedTextRange, !selectedTextRange.isEmpty else { return }
+        copy(sender)
+        replace(selectedTextRange, withText: "")
+    }
+
+    public override func paste(_ sender: Any?) {
+        guard let text = pasteboard.string else { return }
+        // insertText replaces the current selection and splits blocks at newlines.
+        insertText(text)
+    }
+
+    public override func select(_ sender: Any?) {
+        let caret = ProseTextPosition(state.selection.head)
+        guard let word = tokenizer.rangeEnclosingPosition(caret, with: .word, inDirection: .storage(.backward)) else {
+            return
+        }
+        selectedTextRange = word
+    }
+
+    public override func selectAll(_ sender: Any?) {
+        guard let begin = beginningOfDocument as? ProseTextPosition,
+              let end = endOfDocument as? ProseTextPosition else { return }
+        selectedTextRange = ProseTextRange(anchor: begin.position, head: end.position)
+    }
+
     public override var keyCommands: [UIKeyCommand]? {
         let commands = [
             UIKeyCommand(input: "b", modifierFlags: .command, action: #selector(toggleBoldFromKeyCommand)),
@@ -295,29 +395,24 @@ import UIKit
     }
 
     public override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-        guard let key = presses.first?.key, let direction = CaretDirection(key: key) else {
+        guard let key = presses.first?.key, let direction = Self.arrowDirection(for: key) else {
             super.pressesBegan(presses, with: event)
             return
         }
         moveCaret(direction, extending: key.modifierFlags.contains(.shift))
     }
 
-    private enum CaretDirection {
-        case left, right, up, down
-
-        init?(key: UIKey) {
-            switch key.keyCode {
-            case .keyboardLeftArrow: self = .left
-            case .keyboardRightArrow: self = .right
-            case .keyboardUpArrow: self = .up
-            case .keyboardDownArrow: self = .down
-            default: return nil
-            }
+    private static func arrowDirection(for key: UIKey) -> UITextLayoutDirection? {
+        switch key.keyCode {
+        case .keyboardLeftArrow: .left
+        case .keyboardRightArrow: .right
+        case .keyboardUpArrow: .up
+        case .keyboardDownArrow: .down
+        default: nil
         }
     }
 
-    private func moveCaret(_ direction: CaretDirection, extending: Bool) {
-        guard let layoutBox else { return }
+    private func moveCaret(_ direction: UITextLayoutDirection, extending: Bool) {
         let selection = state.selection
 
         if !extending, !selection.isCollapsed, direction == .left || direction == .right {
@@ -325,49 +420,18 @@ import UIKit
             let edge = direction == .left
                 ? min(selection.anchor, selection.head)
                 : max(selection.anchor, selection.head)
-            showsCaret = true
             selectedTextRange = ProseTextRange(anchor: edge, head: edge)
             return
         }
 
-        let head: Position
-        switch direction {
-        case .left: head = geometryMapper.position(before: selection.head, in: layoutBox)
-        case .right: head = geometryMapper.position(after: selection.head, in: layoutBox)
-        case .up: head = geometryMapper.position(above: selection.head, in: layoutBox)
-        case .down: head = geometryMapper.position(below: selection.head, in: layoutBox)
+        guard let head = position(from: ProseTextPosition(selection.head), in: direction, offset: 1) as? ProseTextPosition else {
+            return
         }
-        showsCaret = true
-        selectedTextRange = ProseTextRange(anchor: extending ? selection.anchor : head, head: head)
-    }
-
-    private func drawCaretIfNeeded() {
-        guard isFirstResponder, showsCaret, state.selection.isCollapsed else { return }
-        let rect = caretRect(for: ProseTextPosition(state.selection.head))
-        UIColor.systemBlue.setFill()
-        UIRectFill(rect)
-    }
-
-    private func drawSelectionIfNeeded() {
-        guard let layoutBox, !state.selection.isCollapsed else { return }
-        UIColor.systemBlue.withAlphaComponent(0.22).setFill()
-        for rect in geometryMapper.selectionRects(for: state.selection, in: layoutBox) {
-            UIRectFill(rect)
-        }
+        selectedTextRange = ProseTextRange(anchor: extending ? selection.anchor : head.position, head: head.position)
     }
 
     private func clamp(_ position: Position) -> Position {
         min(max(position, 2), state.document.endTextPosition)
-    }
-
-    private func startCaretBlink() {
-        caretTimer?.invalidate()
-        caretTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.showsCaret.toggle()
-                self?.setNeedsDisplay()
-            }
-        }
     }
 
     private func runCommand(_ command: Command) {

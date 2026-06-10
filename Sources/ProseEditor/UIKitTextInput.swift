@@ -35,4 +35,22 @@ public final class ProseTextRange: UITextRange {
         TextSelection(anchor: anchor, head: head)
     }
 }
+
+public final class ProseTextSelectionRect: UITextSelectionRect {
+    private let rectValue: CGRect
+    private let containsStartValue: Bool
+    private let containsEndValue: Bool
+
+    public init(rect: CGRect, containsStart: Bool, containsEnd: Bool) {
+        self.rectValue = rect
+        self.containsStartValue = containsStart
+        self.containsEndValue = containsEnd
+    }
+
+    public override var rect: CGRect { rectValue }
+    public override var writingDirection: NSWritingDirection { .leftToRight }
+    public override var containsStart: Bool { containsStartValue }
+    public override var containsEnd: Bool { containsEndValue }
+    public override var isVertical: Bool { false }
+}
 #endif
