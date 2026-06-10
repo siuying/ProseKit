@@ -9,19 +9,7 @@ public struct GeometryMapper: Sendable {
         guard let fragment = closestLineFragment(to: point, in: root) else {
             return root.positionRange.lowerBound
         }
-        guard let typeset = fragment.typesetLine else {
-            return fragment.positionRange.lowerBound
-        }
-        let utf16Index = CTLineGetStringIndexForPosition(
-            typeset.line,
-            CGPoint(x: point.x - fragment.frame.minX, y: 0)
-        )
-        guard utf16Index != kCFNotFound else {
-            return fragment.positionRange.lowerBound
-        }
-        let clamped = max(typeset.utf16Range.lowerBound, min(utf16Index, typeset.utf16Range.upperBound))
-        let index = characterIndex(forUTF16Offset: clamped - typeset.utf16Range.lowerBound, in: fragment.text)
-        return fragment.positionRange.lowerBound + fragment.text.distance(from: fragment.text.startIndex, to: index)
+        return position(closestToX: point.x, in: fragment)
     }
 
     public func caretRect(for position: Position, in root: LayoutBox) -> CGRect {
@@ -54,6 +42,76 @@ public struct GeometryMapper: Sendable {
                 height: fragment.frame.height
             )
         }
+    }
+
+    public func position(after position: Position, in root: LayoutBox) -> Position {
+        let blocks = root.children
+        guard let index = blocks.firstIndex(where: { textRange(of: $0).contains(position) || textRange(of: $0).upperBound == position }) else {
+            return position
+        }
+        if position < textRange(of: blocks[index]).upperBound {
+            return position + 1
+        }
+        guard blocks.indices.contains(index + 1) else { return position }
+        return textRange(of: blocks[index + 1]).lowerBound
+    }
+
+    public func position(before position: Position, in root: LayoutBox) -> Position {
+        let blocks = root.children
+        guard let index = blocks.firstIndex(where: { textRange(of: $0).contains(position) || textRange(of: $0).upperBound == position }) else {
+            return position
+        }
+        if position > textRange(of: blocks[index]).lowerBound {
+            return position - 1
+        }
+        guard index > 0 else { return position }
+        return textRange(of: blocks[index - 1]).upperBound
+    }
+
+    public func position(above position: Position, in root: LayoutBox) -> Position {
+        let fragments = root.children.flatMap(\.lineFragments)
+        guard let index = fragments.firstIndex(where: { $0.positionRange.contains(position) || $0.positionRange.upperBound == position }) else {
+            return position
+        }
+        guard index > 0 else {
+            return fragments.first?.positionRange.lowerBound ?? position
+        }
+        let x = caretRect(for: position, in: root).minX
+        return self.position(closestToX: x, in: fragments[index - 1])
+    }
+
+    public func position(below position: Position, in root: LayoutBox) -> Position {
+        let fragments = root.children.flatMap(\.lineFragments)
+        guard let index = fragments.firstIndex(where: { $0.positionRange.contains(position) || $0.positionRange.upperBound == position }) else {
+            return position
+        }
+        guard index + 1 < fragments.count else {
+            return fragments.last?.positionRange.upperBound ?? position
+        }
+        let x = caretRect(for: position, in: root).minX
+        return self.position(closestToX: x, in: fragments[index + 1])
+    }
+
+    /// The caret-valid positions inside a leaf block: past its opening token,
+    /// up to before its closing token.
+    private func textRange(of block: LayoutBox) -> Range<Position> {
+        (block.positionRange.lowerBound + 1)..<(block.positionRange.upperBound - 1)
+    }
+
+    private func position(closestToX x: CGFloat, in fragment: LineFragment) -> Position {
+        guard let typeset = fragment.typesetLine else {
+            return fragment.positionRange.lowerBound
+        }
+        let utf16Index = CTLineGetStringIndexForPosition(
+            typeset.line,
+            CGPoint(x: x - fragment.frame.minX, y: 0)
+        )
+        guard utf16Index != kCFNotFound else {
+            return fragment.positionRange.lowerBound
+        }
+        let clamped = max(typeset.utf16Range.lowerBound, min(utf16Index, typeset.utf16Range.upperBound))
+        let index = characterIndex(forUTF16Offset: clamped - typeset.utf16Range.lowerBound, in: fragment.text)
+        return fragment.positionRange.lowerBound + fragment.text.distance(from: fragment.text.startIndex, to: index)
     }
 
     private func caretOffset(for position: Position, in fragment: LineFragment) -> CGFloat {

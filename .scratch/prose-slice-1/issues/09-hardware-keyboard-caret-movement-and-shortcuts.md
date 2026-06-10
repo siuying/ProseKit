@@ -1,6 +1,6 @@
 # 09 — Hardware keyboard: caret movement & reliable ⌘B/⌘I
 
-Status: ready-for-agent
+Status: done
 
 ## Problem
 
@@ -48,3 +48,17 @@ Two distinct root causes in `Sources/ProseEditor/ProseView.swift`:
 
 - 03 — Caret placement & range selection
 - 05 — Inline marks: bold / italic / code
+
+## Comments
+
+2026-06-10: Done. GeometryMapper gained position(before:/after:/above:/below:)
+— horizontal steps clamp at document edges and hop block-boundary tokens;
+vertical moves hit-test the adjacent line fragment at the caret's x (crossing
+blocks), clamping to the text edges on the first/last line. All unit-tested
+off-screen. ProseView wires arrows via pressesBegan (shift extends the
+TextSelection, plain horizontal arrows collapse it to the edge), implements the
+standard toggleBoldface(_:)/toggleItalics(_:) edit actions, and the custom
+⌘B/⌘I key commands now set wantsPriorityOverSystemBehavior. One criterion left
+open: the live hardware-keyboard pass (arrows + ⌘B/⌘I on a device/simulator
+keyboard) still needs a quick human check — key events cannot be injected from
+the test harness.

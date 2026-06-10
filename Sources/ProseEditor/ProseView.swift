@@ -274,10 +274,71 @@ import UIKit
     }
 
     public override var keyCommands: [UIKeyCommand]? {
-        [
+        let commands = [
             UIKeyCommand(input: "b", modifierFlags: .command, action: #selector(toggleBoldFromKeyCommand)),
             UIKeyCommand(input: "i", modifierFlags: .command, action: #selector(toggleItalicFromKeyCommand)),
         ]
+        // Without priority, the system routes ⌘B/⌘I to the standard edit
+        // actions instead of these commands.
+        for command in commands {
+            command.wantsPriorityOverSystemBehavior = true
+        }
+        return commands
+    }
+
+    public override func toggleBoldface(_ sender: Any?) {
+        runCommand(Commands.toggleMark(.bold))
+    }
+
+    public override func toggleItalics(_ sender: Any?) {
+        runCommand(Commands.toggleMark(.italic))
+    }
+
+    public override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        guard let key = presses.first?.key, let direction = CaretDirection(key: key) else {
+            super.pressesBegan(presses, with: event)
+            return
+        }
+        moveCaret(direction, extending: key.modifierFlags.contains(.shift))
+    }
+
+    private enum CaretDirection {
+        case left, right, up, down
+
+        init?(key: UIKey) {
+            switch key.keyCode {
+            case .keyboardLeftArrow: self = .left
+            case .keyboardRightArrow: self = .right
+            case .keyboardUpArrow: self = .up
+            case .keyboardDownArrow: self = .down
+            default: return nil
+            }
+        }
+    }
+
+    private func moveCaret(_ direction: CaretDirection, extending: Bool) {
+        guard let layoutBox else { return }
+        let selection = state.selection
+
+        if !extending, !selection.isCollapsed, direction == .left || direction == .right {
+            // A plain horizontal arrow collapses the selection to its edge.
+            let edge = direction == .left
+                ? min(selection.anchor, selection.head)
+                : max(selection.anchor, selection.head)
+            showsCaret = true
+            selectedTextRange = ProseTextRange(anchor: edge, head: edge)
+            return
+        }
+
+        let head: Position
+        switch direction {
+        case .left: head = geometryMapper.position(before: selection.head, in: layoutBox)
+        case .right: head = geometryMapper.position(after: selection.head, in: layoutBox)
+        case .up: head = geometryMapper.position(above: selection.head, in: layoutBox)
+        case .down: head = geometryMapper.position(below: selection.head, in: layoutBox)
+        }
+        showsCaret = true
+        selectedTextRange = ProseTextRange(anchor: extending ? selection.anchor : head, head: head)
     }
 
     private func drawCaretIfNeeded() {
