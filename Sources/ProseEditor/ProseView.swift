@@ -20,6 +20,7 @@ import UIKit
     private var state: EditorState
     private var layoutStore: IncrementalLayoutStore
     private var layoutBox: LayoutBox?
+    private let geometryMapper = GeometryMapper(characterWidth: 10)
     private lazy var proseTokenizer = UITextInputStringTokenizer(textInput: self)
     private var caretTimer: Timer?
     private var showsCaret = true
@@ -45,6 +46,7 @@ import UIKit
     public override func draw(_ rect: CGRect) {
         guard let layoutBox else { return }
         UIColor.label.setFill()
+        drawSelectionIfNeeded()
         for box in layoutBox.children {
             draw(block: box)
         }
@@ -90,6 +92,12 @@ import UIKit
            let position = closestPosition(to: point) as? ProseTextPosition {
             selectedTextRange = ProseTextRange(anchor: position.position, head: position.position)
         }
+    }
+
+    public override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let point = touches.first?.location(in: self),
+              let position = closestPosition(to: point) as? ProseTextPosition else { return }
+        selectedTextRange = ProseTextRange(anchor: state.selection.anchor, head: position.position)
     }
 
     public var hasText: Bool {
@@ -220,12 +228,8 @@ import UIKit
     }
 
     public func caretRect(for position: UITextPosition) -> CGRect {
-        guard let position = position as? ProseTextPosition else { return .zero }
-        let block = layoutBox?.children.first { $0.positionRange.contains(position.position) || $0.positionRange.upperBound == position.position }
-        let frame = block?.frame ?? CGRect(x: 0, y: 0, width: bounds.width, height: 24)
-        let textStart = block?.positionRange.lowerBound.advanced(by: 1) ?? 2
-        let column = max(0, position.position - textStart)
-        return CGRect(x: CGFloat(column) * 10, y: frame.minY, width: 2, height: frame.height)
+        guard let position = position as? ProseTextPosition, let layoutBox else { return .zero }
+        return geometryMapper.caretRect(for: position.position, in: layoutBox)
     }
 
     public func selectionRects(for range: UITextRange) -> [UITextSelectionRect] {
@@ -233,11 +237,10 @@ import UIKit
     }
 
     public func closestPosition(to point: CGPoint) -> UITextPosition? {
-        guard let block = layoutBox?.children.min(by: { abs($0.frame.midY - point.y) < abs($1.frame.midY - point.y) }) else {
+        guard let layoutBox else {
             return ProseTextPosition(state.selection.head)
         }
-        let column = max(0, Int((point.x / 10).rounded()))
-        return ProseTextPosition(clamp(block.positionRange.lowerBound + 1 + column))
+        return ProseTextPosition(clamp(geometryMapper.closestPosition(to: point, in: layoutBox)))
     }
 
     public func closestPosition(to point: CGPoint, within range: UITextRange) -> UITextPosition? {
@@ -254,6 +257,14 @@ import UIKit
         let rect = caretRect(for: ProseTextPosition(state.selection.head))
         UIColor.systemBlue.setFill()
         UIRectFill(rect)
+    }
+
+    private func drawSelectionIfNeeded() {
+        guard let layoutBox, !state.selection.isCollapsed else { return }
+        UIColor.systemBlue.withAlphaComponent(0.22).setFill()
+        for rect in geometryMapper.selectionRects(for: state.selection, in: layoutBox) {
+            UIRectFill(rect)
+        }
     }
 
     private func clamp(_ position: Position) -> Position {
