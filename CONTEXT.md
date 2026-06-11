@@ -59,6 +59,13 @@ The function that remaps a **Position** across one or more **Steps**, so selecti
 decorations, and remote/undo positions survive edits.
 _Avoid_: offset adjustment, rebase (rebase is a higher-level use of Mapping)
 
+**Changed Range**:
+The range of **Positions** in the resulting Document that a **Transaction**
+touched: the union of its Steps' affected ranges, each carried forward through
+the later Steps via **Mapping**. Consumers (layout, decorations) treat
+everything outside it as untouched.
+_Avoid_: dirty range, invalidation range (those are layout-side reactions to it)
+
 **Selection**:
 The current caret/range, expressed in **Positions**. A protocol; today only
 `TextSelection` (an anchor Position and a head Position; collapsed = caret) exists.
