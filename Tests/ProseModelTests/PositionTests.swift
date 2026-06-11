@@ -13,6 +13,15 @@ final class PositionTests: XCTestCase {
         XCTAssertEqual(document.endPosition, 15)
         XCTAssertEqual(document.endTextPosition, 14)
     }
+
+    func testEndTextPositionUsesTheLastCaretablePositionInAnEmptyBlock() throws {
+        let document = Document(.doc([
+            .paragraph([.text("hello")]),
+            .paragraph([]),
+        ]))
+
+        XCTAssertEqual(document.endTextPosition, 9)
+    }
 }
 
 private enum Fixtures {

@@ -17,10 +17,10 @@ public struct GeometryMapper: Sendable {
             return .zero
         }
         return CGRect(
-            x: fragment.frame.minX + caretOffset(for: position, in: fragment),
-            y: fragment.frame.minY,
+            x: fragment.absoluteFrame.minX + caretOffset(for: position, in: fragment),
+            y: fragment.absoluteFrame.minY,
             width: 2,
-            height: fragment.frame.height
+            height: fragment.absoluteFrame.height
         )
     }
 
@@ -29,24 +29,26 @@ public struct GeometryMapper: Sendable {
         let upper = max(selection.anchor, selection.head)
         guard lower < upper else { return [] }
 
-        return root.children.flatMap(\.lineFragments).compactMap { fragment in
-            let start = max(lower, fragment.positionRange.lowerBound)
-            let end = min(upper, fragment.positionRange.upperBound)
+        return lineFragments(in: root).compactMap { fragment in
+            let start = max(lower, fragment.absolutePositionRange.lowerBound)
+            let end = min(upper, fragment.absolutePositionRange.upperBound)
             guard start < end else { return nil }
             let startX = caretOffset(for: start, in: fragment)
             let endX = caretOffset(for: end, in: fragment)
             return CGRect(
-                x: fragment.frame.minX + startX,
-                y: fragment.frame.minY,
+                x: fragment.absoluteFrame.minX + startX,
+                y: fragment.absoluteFrame.minY,
                 width: endX - startX,
-                height: fragment.frame.height
+                height: fragment.absoluteFrame.height
             )
         }
     }
 
     public func position(after position: Position, in root: LayoutBox) -> Position {
         let blocks = root.children
-        guard let index = blocks.firstIndex(where: { textRange(of: $0).contains(position) || textRange(of: $0).upperBound == position }) else {
+        guard let index = blocks.firstIndex(where: {
+            textRange(of: $0).contains(position) || textRange(of: $0).upperBound == position
+        }) else {
             return position
         }
         if position < textRange(of: blocks[index]).upperBound {
@@ -58,7 +60,9 @@ public struct GeometryMapper: Sendable {
 
     public func position(before position: Position, in root: LayoutBox) -> Position {
         let blocks = root.children
-        guard let index = blocks.firstIndex(where: { textRange(of: $0).contains(position) || textRange(of: $0).upperBound == position }) else {
+        guard let index = blocks.firstIndex(where: {
+            textRange(of: $0).contains(position) || textRange(of: $0).upperBound == position
+        }) else {
             return position
         }
         if position > textRange(of: blocks[index]).lowerBound {
@@ -69,55 +73,57 @@ public struct GeometryMapper: Sendable {
     }
 
     public func position(above position: Position, in root: LayoutBox) -> Position {
-        let fragments = root.children.flatMap(\.lineFragments)
-        guard let index = fragments.firstIndex(where: { $0.positionRange.contains(position) || $0.positionRange.upperBound == position }) else {
+        let fragments = lineFragments(in: root)
+        guard let index = fragments.firstIndex(where: {
+            $0.absolutePositionRange.contains(position) || $0.absolutePositionRange.upperBound == position
+        }) else {
             return position
         }
         guard index > 0 else {
-            return fragments.first?.positionRange.lowerBound ?? position
+            return fragments.first?.absolutePositionRange.lowerBound ?? position
         }
         let x = caretRect(for: position, in: root).minX
         return self.position(closestToX: x, in: fragments[index - 1])
     }
 
     public func position(below position: Position, in root: LayoutBox) -> Position {
-        let fragments = root.children.flatMap(\.lineFragments)
-        guard let index = fragments.firstIndex(where: { $0.positionRange.contains(position) || $0.positionRange.upperBound == position }) else {
+        let fragments = lineFragments(in: root)
+        guard let index = fragments.firstIndex(where: {
+            $0.absolutePositionRange.contains(position) || $0.absolutePositionRange.upperBound == position
+        }) else {
             return position
         }
         guard index + 1 < fragments.count else {
-            return fragments.last?.positionRange.upperBound ?? position
+            return fragments.last?.absolutePositionRange.upperBound ?? position
         }
         let x = caretRect(for: position, in: root).minX
         return self.position(closestToX: x, in: fragments[index + 1])
     }
 
-    /// The caret-valid positions inside a leaf block: past its opening token,
-    /// up to before its closing token.
     private func textRange(of block: LayoutBox) -> Range<Position> {
         (block.positionRange.lowerBound + 1)..<(block.positionRange.upperBound - 1)
     }
 
-    private func position(closestToX x: CGFloat, in fragment: LineFragment) -> Position {
-        guard let typeset = fragment.typesetLine else {
-            return fragment.positionRange.lowerBound
+    private func position(closestToX x: CGFloat, in fragment: AbsoluteLineFragment) -> Position {
+        guard let typeset = fragment.line.typesetLine else {
+            return fragment.absolutePositionRange.lowerBound
         }
         let utf16Index = CTLineGetStringIndexForPosition(
             typeset.line,
-            CGPoint(x: x - fragment.frame.minX, y: 0)
+            CGPoint(x: x - fragment.absoluteFrame.minX, y: 0)
         )
         guard utf16Index != kCFNotFound else {
-            return fragment.positionRange.lowerBound
+            return fragment.absolutePositionRange.lowerBound
         }
         let clamped = max(typeset.utf16Range.lowerBound, min(utf16Index, typeset.utf16Range.upperBound))
-        let index = characterIndex(forUTF16Offset: clamped - typeset.utf16Range.lowerBound, in: fragment.text)
-        return fragment.positionRange.lowerBound + fragment.text.distance(from: fragment.text.startIndex, to: index)
+        let index = characterIndex(forUTF16Offset: clamped - typeset.utf16Range.lowerBound, in: fragment.line.text)
+        return fragment.absolutePositionRange.lowerBound + fragment.line.text.distance(from: fragment.line.text.startIndex, to: index)
     }
 
-    private func caretOffset(for position: Position, in fragment: LineFragment) -> CGFloat {
-        guard let typeset = fragment.typesetLine else { return 0 }
-        let characterOffset = max(0, min(fragment.text.count, position - fragment.positionRange.lowerBound))
-        let utf16Offset = fragment.text.prefix(characterOffset).utf16.count
+    private func caretOffset(for position: Position, in fragment: AbsoluteLineFragment) -> CGFloat {
+        guard let typeset = fragment.line.typesetLine else { return 0 }
+        let characterOffset = max(0, min(fragment.line.text.count, position - fragment.absolutePositionRange.lowerBound))
+        let utf16Offset = fragment.line.text.prefix(characterOffset).utf16.count
         return CGFloat(CTLineGetOffsetForStringIndex(
             typeset.line,
             typeset.utf16Range.lowerBound + utf16Offset,
@@ -125,16 +131,37 @@ public struct GeometryMapper: Sendable {
         ))
     }
 
-    private func closestLineFragment(to point: CGPoint, in root: LayoutBox) -> LineFragment? {
-        root.children
-            .flatMap(\.lineFragments)
-            .min { abs($0.frame.midY - point.y) < abs($1.frame.midY - point.y) }
+    private func closestLineFragment(to point: CGPoint, in root: LayoutBox) -> AbsoluteLineFragment? {
+        lineFragments(in: root)
+            .min { abs($0.absoluteFrame.midY - point.y) < abs($1.absoluteFrame.midY - point.y) }
     }
 
-    private func lineFragment(containing position: Position, in root: LayoutBox) -> LineFragment? {
-        let fragments = root.children.flatMap(\.lineFragments)
+    private func lineFragment(containing position: Position, in root: LayoutBox) -> AbsoluteLineFragment? {
+        let fragments = lineFragments(in: root)
         return fragments.first {
-            $0.positionRange.contains(position) || $0.positionRange.upperBound == position
+            $0.absolutePositionRange.contains(position) || $0.absolutePositionRange.upperBound == position
         } ?? fragments.last
+    }
+
+    private func lineFragments(in root: LayoutBox) -> [AbsoluteLineFragment] {
+        root.children.flatMap { block in
+            block.lineFragments.map { line in
+                AbsoluteLineFragment(block: block, line: line)
+            }
+        }
+    }
+}
+
+private struct AbsoluteLineFragment {
+    var block: LayoutBox
+    var line: LineFragment
+
+    var absoluteFrame: CGRect {
+        line.frame.offsetBy(dx: block.frame.minX, dy: block.frame.minY)
+    }
+
+    var absolutePositionRange: Range<Position> {
+        (block.positionRange.lowerBound + line.positionRange.lowerBound)
+            ..< (block.positionRange.lowerBound + line.positionRange.upperBound)
     }
 }

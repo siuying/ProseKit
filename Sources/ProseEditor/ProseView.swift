@@ -72,8 +72,11 @@ import UIKit
     private func draw(block: LayoutBox, in context: CGContext) {
         for fragment in block.lineFragments {
             guard let typeset = fragment.typesetLine else { continue }
-            let baseline = fragment.frame.minY + typeset.ascent
-            context.textPosition = CGPoint(x: fragment.frame.minX, y: bounds.height - baseline)
+            let baseline = block.frame.minY + fragment.frame.minY + typeset.ascent
+            context.textPosition = CGPoint(
+                x: block.frame.minX + fragment.frame.minX,
+                y: bounds.height - baseline
+            )
             CTLineDraw(typeset.line, context)
         }
     }
@@ -231,7 +234,7 @@ import UIKit
 
     public func position(from position: UITextPosition, offset: Int) -> UITextPosition? {
         guard let position = position as? ProseTextPosition else { return nil }
-        return ProseTextPosition(clamp(self.position(atCharacterOffset: characterOffset(of: position.position) + offset)))
+        return ProseTextPosition(clamp(textPosition(position.position, movedByCharacterOffset: offset)))
     }
 
     public func position(from position: UITextPosition, in direction: UITextLayoutDirection, offset: Int) -> UITextPosition? {
@@ -296,6 +299,65 @@ import UIKit
             remaining -= count
         }
         return state.document.endTextPosition
+    }
+
+    private func textPosition(_ position: Position, movedByCharacterOffset offset: Int) -> Position {
+        if offset == 0 { return position }
+        return offset > 0
+            ? textPosition(position, movedForwardByCharacterOffset: offset)
+            : textPosition(position, movedBackwardByCharacterOffset: -offset)
+    }
+
+    private func textPosition(_ position: Position, movedForwardByCharacterOffset offset: Int) -> Position {
+        var current = position
+        var remaining = offset
+
+        while remaining > 0 {
+            guard let info = state.document.blockInfo(containing: current) else {
+                return state.document.endTextPosition
+            }
+            let textStart = info.start + 1
+            let textEnd = textStart + info.node.plainText.count
+            let distanceInsideBlock = max(0, textEnd - current)
+            if remaining <= distanceInsideBlock {
+                return current + remaining
+            }
+            remaining -= distanceInsideBlock
+            guard state.document.root.content.indices.contains(info.index + 1),
+                  let nextTextStart = state.document.position(ofTextInBlockAt: info.index + 1) else {
+                return textEnd
+            }
+            remaining -= 1
+            current = nextTextStart
+        }
+
+        return current
+    }
+
+    private func textPosition(_ position: Position, movedBackwardByCharacterOffset offset: Int) -> Position {
+        var current = position
+        var remaining = offset
+
+        while remaining > 0 {
+            guard let info = state.document.blockInfo(containing: current) else {
+                return 2
+            }
+            let textStart = info.start + 1
+            let distanceInsideBlock = max(0, current - textStart)
+            if remaining <= distanceInsideBlock {
+                return current - remaining
+            }
+            remaining -= distanceInsideBlock
+            guard info.index > 0,
+                  let previousTextStart = state.document.position(ofTextInBlockAt: info.index - 1) else {
+                return textStart
+            }
+            remaining -= 1
+            let previous = state.document.root.content[info.index - 1]
+            current = previousTextStart + previous.plainText.count
+        }
+
+        return current
     }
 
     public func position(within range: UITextRange, farthestIn direction: UITextLayoutDirection) -> UITextPosition? {

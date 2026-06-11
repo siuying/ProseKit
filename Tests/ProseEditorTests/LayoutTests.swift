@@ -32,4 +32,26 @@ final class LayoutTests: XCTestCase {
             XCTAssertTrue(fragment.text.hasSuffix(" "), "wrapped line should break at a word boundary: '\(fragment.text)'")
         }
     }
+
+    func testLeafLineFragmentsUseBoxRelativeGeometryAndPositions() throws {
+        let document = Document(.doc([
+            .paragraph([.text("alpha")]),
+            .paragraph([.text("beta")]),
+        ]))
+
+        let layout = try LayoutEngine(schema: .slice1).layout(document, width: 320)
+
+        let second = layout.children[1]
+        XCTAssertGreaterThan(second.frame.minY, 0)
+        XCTAssertEqual(second.lineFragments[0].frame.minY, 0)
+        XCTAssertEqual(second.lineFragments[0].positionRange, 1..<5)
+
+        let mapper = GeometryMapper()
+        let absoluteTextStart = second.positionRange.lowerBound + second.lineFragments[0].positionRange.lowerBound
+        XCTAssertEqual(
+            mapper.caretRect(for: absoluteTextStart, in: layout).minY,
+            second.frame.minY,
+            accuracy: 0.5
+        )
+    }
 }

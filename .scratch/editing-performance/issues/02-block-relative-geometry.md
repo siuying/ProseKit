@@ -108,3 +108,35 @@ discovered after: caret at block start/end, selection spanning blocks,
 
 - 01 — Incremental relayout on every edit path (benchmarks must be green
   first; strict sequencing decision, see README)
+
+## Comments
+
+### 2026-06-11 — implementation benchmark run
+
+Branch: `editing-performance-02-block-relative-geometry`
+
+Verification:
+
+- `swift test` passed: 33 tests, 0 failures.
+- `xcodebuild test -scheme Prose-Package -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:ProseEditorTests/PerformanceTests` passed: 17 tests, 0 failures.
+- After the O(1) `Document.endTextPosition` cache landed, targeted final check
+  also passed: `xcodebuild test -scheme Prose-Package -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:ProseEditorTests/PerformanceTests/testInteractionPathTypingManyPagesProse`.
+
+Measured ProseView averages from the final simulator run, 50 keystrokes per
+editing iteration:
+
+- Interaction-path typing, many pages: 0.139 s total, about 2.78 ms/key, rsd 4.554%.
+- Typing at end, many pages: 0.048 s total, about 0.96 ms/key, rsd 7.407%.
+- Typing at start, many pages: 0.053 s total, about 1.06 ms/key, rsd 3.177%.
+- Typing with paragraph breaks, many pages: 0.051 s total, about 1.02 ms/key, rsd 4.151%.
+- Full layout, many pages: 0.017 s, rsd 7.901%.
+- Initial render, many pages: 0.030 s, rsd 19.621%. The first iteration was the outlier; the remaining iterations clustered around 0.027-0.029 s.
+
+Notes:
+
+- `LayoutBox.shifted` was removed; reused boxes now update only their box frame
+  and absolute Position range.
+- Leaf `LineFragment` geometry and Position ranges are box-relative.
+- ADR added at `docs/adr/0001-box-relative-layout-fragments.md`.
+- Final targeted interaction-path check after the `endTextPosition` cache:
+  0.172 s total, about 3.44 ms/key, rsd 9.393%.
