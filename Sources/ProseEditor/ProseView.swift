@@ -230,7 +230,7 @@ import UIKit
 
     public func position(from position: UITextPosition, offset: Int) -> UITextPosition? {
         guard let position = position as? ProseTextPosition else { return nil }
-        return ProseTextPosition(clamp(position.position + offset))
+        return ProseTextPosition(clamp(self.position(atCharacterOffset: characterOffset(of: position.position) + offset)))
     }
 
     public func position(from position: UITextPosition, in direction: UITextLayoutDirection, offset: Int) -> UITextPosition? {
@@ -260,7 +260,41 @@ import UIKit
         guard let from = from as? ProseTextPosition, let to = toPosition as? ProseTextPosition else {
             return 0
         }
-        return to.position - from.position
+        return characterOffset(of: to.position) - characterOffset(of: from.position)
+    }
+
+    /// Character offset into the "\n"-joined plain text for a document
+    /// position. A block boundary is two positions (close + open token) but
+    /// reads as one "\n", so position arithmetic and string arithmetic drift
+    /// apart by one per boundary; UITextInput offset math must stay in
+    /// character space to agree with text(in:). Inverse of
+    /// position(atCharacterOffset:).
+    private func characterOffset(of position: Position) -> Int {
+        var characters = 0
+        for (index, block) in state.document.root.content.enumerated() {
+            guard let textStart = state.document.position(ofTextInBlockAt: index) else { continue }
+            if index > 0 { characters += 1 }
+            let text = block.plainText
+            if position <= textStart + text.count {
+                return characters + max(0, position - textStart)
+            }
+            characters += text.count
+        }
+        return characters
+    }
+
+    private func position(atCharacterOffset offset: Int) -> Position {
+        var remaining = offset
+        for (index, block) in state.document.root.content.enumerated() {
+            guard let textStart = state.document.position(ofTextInBlockAt: index) else { continue }
+            if index > 0 { remaining -= 1 }
+            let count = block.plainText.count
+            if remaining <= count {
+                return textStart + max(0, remaining)
+            }
+            remaining -= count
+        }
+        return state.document.endTextPosition
     }
 
     public func position(within range: UITextRange, farthestIn direction: UITextLayoutDirection) -> UITextPosition? {
@@ -268,9 +302,11 @@ import UIKit
     }
 
     public func characterRange(byExtending position: UITextPosition, in direction: UITextLayoutDirection) -> UITextRange? {
-        guard let position = position as? ProseTextPosition else { return nil }
-        let end = direction == .left ? position.position - 1 : position.position + 1
-        return ProseTextRange(anchor: position.position, head: clamp(end))
+        guard let position = position as? ProseTextPosition,
+              let end = self.position(from: position, offset: direction == .left ? -1 : 1) as? ProseTextPosition else {
+            return nil
+        }
+        return ProseTextRange(anchor: position.position, head: end.position)
     }
 
     public func baseWritingDirection(for position: UITextPosition, in direction: UITextStorageDirection) -> NSWritingDirection {

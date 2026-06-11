@@ -226,6 +226,57 @@ final class ProseViewTests: XCTestCase {
         XCTAssertTrue(view.resignFirstResponder())
         XCTAssertEqual(display?.isActivated, false, "caret hides when focus is lost")
     }
+
+    func testTokenizerSelectsWholeWordInLaterBlocks() throws {
+        // Double-tap word selection goes through the system tokenizer, which
+        // mixes text(in:) string offsets with position(from:offset:) moves.
+        // A block boundary is 2 positions but reads as one "\n", so words in
+        // later blocks used to come back short by one character per
+        // preceding boundary.
+        let view = makeView(Document(.doc([
+            .heading(level: 1, [.text("Hello")]),
+            .paragraph([.text("world")]),
+            .paragraph([.text("Testing")]),
+        ])))
+
+        // Caret inside "Testing" ("Testing" text spans 16..<23).
+        let caret = ProseTextPosition(19)
+        let word = try XCTUnwrap(view.tokenizer.rangeEnclosingPosition(caret, with: .word, inDirection: .storage(.backward)))
+        XCTAssertEqual(view.text(in: word), "Testing")
+
+        view.selectedTextRange = ProseTextRange(anchor: 19, head: 19)
+        view.select(nil)
+        XCTAssertEqual(view.text(in: view.selectedTextRange!), "Testing")
+    }
+
+    func testOffsetArithmeticMatchesTextInAcrossBlockBoundaries() throws {
+        // UITextInput contract: offset(from:to:) must equal the character
+        // count of text(in:) for the same range, and position(from:offset:)
+        // must be its inverse.
+        let view = makeView(Document(.doc([
+            .heading(level: 1, [.text("Hello")]),
+            .paragraph([.text("world")]),
+            .paragraph([.text("Testing")]),
+        ])))
+
+        let begin = view.beginningOfDocument
+        let end = view.endOfDocument
+        let text = try XCTUnwrap(view.text(in: ProseTextRange(anchor: 2, head: view.document.endTextPosition)))
+        XCTAssertEqual(text, "Hello\nworld\nTesting")
+        XCTAssertEqual(view.offset(from: begin, to: end), text.count)
+
+        // Advancing by the character offset of "Testing" in the joined text
+        // lands on its first document position (16).
+        let testingStart = view.position(from: begin, offset: 12) as! ProseTextPosition
+        XCTAssertEqual(testingStart.position, 16)
+        XCTAssertEqual(view.offset(from: begin, to: testingStart), 12)
+
+        // Round-trip from a position inside "world" (9..<14).
+        let insideWorld = ProseTextPosition(11)
+        let offset = view.offset(from: begin, to: insideWorld)
+        XCTAssertEqual(offset, 8, "\"Hello\\n\" is 6 chars, plus 2 into \"world\"")
+        XCTAssertEqual((view.position(from: begin, offset: offset) as! ProseTextPosition).position, 11)
+    }
 }
 
 @MainActor
