@@ -1,6 +1,6 @@
 # 03 — Typing-at-start anomaly (gated investigation)
 
-Status: ready-for-agent
+Status: ready-for-human
 
 ## What to build
 
@@ -64,3 +64,18 @@ re-measuring would be optimizing a symptom we cannot attribute.
 
 - 01 — Incremental relayout on every edit path (the re-measurement is
   meaningless before it)
+
+## Comments
+
+### 2026-06-11 — closed by measurement
+
+Branch: `editing-performance-03-typing-start-gate`
+
+Gate result from the final issue-02 full performance run:
+
+- Typing at end, many pages: 0.048 s per 50 keys, about 0.96 ms/key, rsd 7.407%.
+- Typing at start, many pages: 0.053 s per 50 keys, about 1.06 ms/key, rsd 3.177%.
+- Ratio: about 1.10x typing-at-end.
+
+The anomaly is below the 2x gate, so no diagnosis or code change is needed for
+this issue. Research finding #3 was updated to record the outcome.

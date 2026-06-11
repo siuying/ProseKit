@@ -61,13 +61,12 @@ Averages over 10 `measure` iterations; editing = 50 keystrokes per iteration.
    roughly the one-page numbers (~2 ms/key). The benchmarks above are the
    acceptance test.
 
-3. **Unexplained: typing at start is ~6× slower than typing at end** (114 vs
-   19 ms/key, rsd 95%). Full re-typeset cost is position-independent, so the
-   extra cost — and the huge variance — must be in the model layer
-   (`ReplaceStep` apply / `Document.replacingText` / transaction dispatch near
-   position 2) or in `characterOffset(of:)`-style linear scans in ProseView.
-   Diagnose before optimizing; fixing the `changedRange` plumbing first may
-   change this number, so re-measure after fix #2.
+3. **Resolved: the typing-at-start anomaly closed by measurement.** After the
+   incremental relayout and box-relative geometry work, the 2026-06-11 issue-02
+   simulator run measured typing at start at 0.053 s per 50 keys (~1.06 ms/key,
+   rsd 3.177%) and typing at end at 0.048 s per 50 keys (~0.96 ms/key, rsd
+   7.407%). The start/end ratio is ~1.10×, below the 2× gate, so no separate
+   diagnosis was needed.
 
 4. **Caveat on the one Prose editing win:** UITextView's 83 ms/backspace is
    suspiciously slow with high variance — likely a TextKit 2 invalidation
@@ -93,8 +92,8 @@ Averages over 10 `measure` iterations; editing = 50 keystrokes per iteration.
 1. Thread `changedRange` from ProseView edit paths into the layout store
    (finding #2). Re-run the benchmarks; expect typing-at-end many-pages to
    drop ~10×.
-2. Re-measure typing-at-start. If still disproportionate, diagnose the model
-   layer (finding #3) — `/diagnose` is the right loop for it.
+2. Typing-at-start has been re-measured and is no longer disproportionate.
+   No `/diagnose` follow-up is needed for finding #3.
 3. Consider draw-rect culling: `ProseView.draw(_:)` draws every line fragment
    on every redraw regardless of the dirty rect — irrelevant in these
    benchmarks (raster was one screen) but it will matter once scrolling lands.
