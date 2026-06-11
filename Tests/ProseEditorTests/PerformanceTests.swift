@@ -145,7 +145,12 @@ final class PerformanceTests: XCTestCase {
 
     // MARK: - Typing (one character per keystroke, layout flushed per keystroke)
 
-    private func measureTypingProse(_ paragraphs: [String], atStart: Bool = false) {
+    private func measureTypingProse(
+        _ paragraphs: [String],
+        atStart: Bool = false,
+        paragraphBreakEvery breakInterval: Int? = nil,
+        exerciseInteractionPath: Bool = false
+    ) {
         let document = makeDocument(paragraphs)
         measureMetrics([.wallClockTime], automaticallyStartMeasuring: false) {
             MainActor.assumeIsolated {
@@ -155,11 +160,30 @@ final class PerformanceTests: XCTestCase {
                     view.selectedTextRange = ProseTextRange(anchor: 2, head: 2)
                 }
                 startMeasuring()
-                for _ in 0..<Self.keystrokes {
-                    view.insertText("x")
+                for index in 0..<Self.keystrokes {
+                    if let breakInterval, index > 0, index.isMultiple(of: breakInterval) {
+                        view.insertText("\n")
+                    } else {
+                        view.insertText("x")
+                    }
+                    if exerciseInteractionPath {
+                        exerciseUIKitInteractionPath(on: view)
+                    }
                 }
                 stopMeasuring()
             }
+        }
+    }
+
+    private func exerciseUIKitInteractionPath(on view: ProseView) {
+        guard let selection = view.selectedTextRange as? ProseTextRange else { return }
+        _ = view.caretRect(for: selection.end)
+        _ = view.selectionRects(for: ProseTextRange(
+            anchor: max(2, selection.head - 1),
+            head: selection.head
+        ))
+        if let moved = view.position(from: selection.end, offset: -1) {
+            _ = view.position(from: moved, offset: 1)
         }
     }
 
@@ -190,6 +214,14 @@ final class PerformanceTests: XCTestCase {
 
     func testTypingAtEndManyPagesProse() {
         measureTypingProse(TheLastQuestion.manyPages)
+    }
+
+    func testTypingWithParagraphBreaksManyPagesProse() {
+        measureTypingProse(TheLastQuestion.manyPages, paragraphBreakEvery: 10)
+    }
+
+    func testInteractionPathTypingManyPagesProse() {
+        measureTypingProse(TheLastQuestion.manyPages, exerciseInteractionPath: true)
     }
 
     func testTypingAtEndManyPagesUITextView() {

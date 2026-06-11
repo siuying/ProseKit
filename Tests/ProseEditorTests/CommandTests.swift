@@ -15,6 +15,7 @@ final class CommandTests: XCTestCase {
         XCTAssertEqual(state.document.root.content[1].plainText, "llo")
         XCTAssertEqual(state.selection, TextSelection(anchor: 6, head: 6))
         XCTAssertFalse(state.document.containsText("\n"))
+        XCTAssertEqual(state.lastTransaction?.changedRange, 1..<10)
     }
 
     func testBackspaceAtBlockStartJoinsWithPreviousBlock() throws {
@@ -29,6 +30,7 @@ final class CommandTests: XCTestCase {
         XCTAssertEqual(state.document.root.content[0].plainText, "helloworld")
         XCTAssertEqual(state.selection, TextSelection(anchor: 7, head: 7))
         XCTAssertFalse(state.document.containsText("\n"))
+        XCTAssertEqual(state.lastTransaction?.changedRange, 1..<14)
     }
 
     func testBackspaceInEmptyBlockRemovesIt() throws {
@@ -52,6 +54,7 @@ final class CommandTests: XCTestCase {
         XCTAssertTrue(try Commands.toggleHeading(level: 1).run(in: &state))
         XCTAssertEqual(state.document.root.content[0].type, "heading")
         XCTAssertEqual(state.document.root.content[0].plainText, "hello")
+        XCTAssertEqual(state.lastTransaction?.changedRange, 1..<8)
 
         XCTAssertTrue(try Commands.toggleHeading(level: 1).run(in: &state))
         XCTAssertEqual(state.document.root.content[0].type, "paragraph")

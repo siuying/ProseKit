@@ -16,8 +16,8 @@ public enum Commands {
     public static func splitBlock() -> Command {
         Command { state in
             guard state.selection.isCollapsed else { return false }
-            let (document, selection) = try state.document.splitBlock(at: state.selection.head)
-            state.replaceDocument(document, selection: selection)
+            let (document, selection, changedRange) = try state.document.splitBlock(at: state.selection.head)
+            state.replaceDocument(document, selection: selection, changedRange: changedRange)
             return true
         }
     }
@@ -28,15 +28,18 @@ public enum Commands {
                   let result = try state.document.joinBackward(at: state.selection.head) else {
                 return false
             }
-            state.replaceDocument(result.0, selection: result.1)
+            state.replaceDocument(result.0, selection: result.1, changedRange: result.2)
             return true
         }
     }
 
     public static func toggleHeading(level: Int) -> Command {
         Command { state in
-            let (document, selection) = try state.document.togglingHeading(at: state.selection.head, level: level)
-            state.replaceDocument(document, selection: selection)
+            let (document, selection, changedRange) = try state.document.togglingHeading(
+                at: state.selection.head,
+                level: level
+            )
+            state.replaceDocument(document, selection: selection, changedRange: changedRange)
             return true
         }
     }
@@ -53,7 +56,7 @@ public enum Commands {
             let document = state.document.rangeHasMark(from: lower, to: upper, mark: mark)
                 ? try state.document.removingMark(from: lower, to: upper, mark: mark)
                 : try state.document.addingMark(from: lower, to: upper, mark: mark)
-            state.replaceDocument(document, selection: state.selection)
+            state.replaceDocument(document, selection: state.selection, changedRange: lower..<upper)
             return true
         }
     }

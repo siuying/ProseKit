@@ -74,6 +74,9 @@ public struct LayoutBox: Equatable, Sendable {
     func shifted(toY y: CGFloat, positionRange range: Range<Position>) -> LayoutBox {
         let deltaY = y - frame.origin.y
         let deltaPosition = range.lowerBound - positionRange.lowerBound
+        if deltaY == 0, deltaPosition == 0 {
+            return self
+        }
         var copy = self
         copy.frame.origin.y = y
         copy.positionRange = range
@@ -135,16 +138,23 @@ public struct IncrementalLayoutStore: Sendable {
         var y: CGFloat = 0
         var position = 1
         let oldChildren = previous?.children ?? []
+        let tailIndexDelta = oldChildren.count - document.root.content.count
 
         let children = document.root.content.enumerated().map { index, block -> LayoutBox in
             let range = position..<(position + block.nodeSize)
             defer { position = range.upperBound }
+            let oldIndex: Int
+            if let changedRange, range.lowerBound >= changedRange.upperBound {
+                oldIndex = index + tailIndexDelta
+            } else {
+                oldIndex = index
+            }
 
             if let changedRange,
                !rangesIntersect(range, changedRange),
-               oldChildren.indices.contains(index),
-               oldChildren[index].node == block {
-                let reused = oldChildren[index].shifted(toY: y, positionRange: range)
+               oldChildren.indices.contains(oldIndex),
+               oldChildren[oldIndex].node == block {
+                let reused = oldChildren[oldIndex].shifted(toY: y, positionRange: range)
                 y = reused.frame.maxY + 12
                 return reused
             }

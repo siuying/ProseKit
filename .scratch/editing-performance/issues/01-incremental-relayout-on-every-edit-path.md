@@ -137,3 +137,23 @@ public struct EditorState {
 ## Blocked by
 
 None — can start immediately.
+
+## Comments
+
+### 2026-06-11 — implementation benchmark run
+
+Branch: `editing-performance-01-incremental-relayout`
+
+Verification:
+
+- `swift test` passed: 31 tests, 0 failures.
+- `xcodebuild test -scheme Prose-Package -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:ProseEditorTests/PerformanceTests` passed: 17 tests, 0 failures.
+
+Measured ProseView averages from the simulator run, 50 keystrokes per editing iteration:
+
+- Typing at end, many pages: 0.054 s total, about 1.08 ms/key, rsd 5.443%.
+- Typing with paragraph breaks, many pages: 0.046 s total, about 0.92 ms/key, rsd 5.813%.
+- Typing at start, many pages: 0.058 s total, about 1.16 ms/key, rsd 5.293%.
+- Interaction-path typing, many pages: 2.608 s total, about 52.16 ms/key, rsd 25.379%. This is recorded as the before number for issue 02.
+- Full layout, many pages: 0.016 s, rsd 7.391%.
+- Initial render, many pages: 0.026 s, rsd 21.619%; average matches the baseline, with the first iteration as the outlier.
