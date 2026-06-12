@@ -11,12 +11,26 @@ final class EditorStateTests: XCTestCase {
         try state.insertText("!")
         XCTAssertEqual(state.document.plainText, "hi!")
         XCTAssertEqual(state.selection, TextSelection(anchor: 5, head: 5))
-        XCTAssertEqual(state.dispatchedTransactions.map(\.origin), [.local])
+        XCTAssertEqual(state.lastTransaction?.origin, .local)
+        XCTAssertEqual(state.lastTransaction?.changedRange, 4..<5)
 
         try state.deleteBackward()
         XCTAssertEqual(state.document.plainText, "hi")
         XCTAssertEqual(state.selection, TextSelection(anchor: 4, head: 4))
-        XCTAssertEqual(state.dispatchedTransactions.map(\.origin), [.local, .local])
+        XCTAssertEqual(state.lastTransaction?.origin, .local)
+        XCTAssertEqual(state.lastTransaction?.changedRange, 4..<5)
+    }
+
+    func testTypingMarksInsertSuppliesChangedRange() throws {
+        var state = EditorState(document: Document(.doc([
+            .paragraph([.text("hi")]),
+        ])), selection: TextSelection(anchor: 4, head: 4))
+
+        state.toggleTypingMark(.code)
+        try state.insertText("!")
+
+        XCTAssertEqual(state.document.plainText, "hi!")
+        XCTAssertEqual(state.lastTransaction?.changedRange, 4..<5)
     }
 
     func testIncrementalLayoutKeepsUnaffectedBoxesCached() throws {
@@ -60,5 +74,26 @@ final class EditorStateTests: XCTestCase {
         let mapper = GeometryMapper()
         let rect = mapper.caretRect(for: expectedStart + 2, in: updated)
         XCTAssertEqual(mapper.closestPosition(to: CGPoint(x: rect.midX, y: rect.midY), in: updated), expectedStart + 2)
+    }
+
+    func testIncrementalLayoutRealignsTailAfterBlockSplit() throws {
+        let document = Document(.doc([
+            .paragraph([.text("alpha")]),
+            .paragraph([.text("beta")]),
+            .paragraph([.text("gamma")]),
+        ]))
+        var store = IncrementalLayoutStore(schema: .slice1, width: 240)
+        let initial = try store.layout(document)
+
+        let (updatedDocument, _, changedRange) = try document.splitBlock(at: 4)
+        let updated = try store.layout(updatedDocument, changedRange: changedRange)
+
+        XCTAssertEqual(updated.children.count, 4)
+        XCTAssertEqual(updated.children[3].node.plainText, "gamma")
+        XCTAssertEqual(
+            updated.children[3].typesetID,
+            initial.children[2].typesetID,
+            "blocks below the split should align with their old index and be reused"
+        )
     }
 }

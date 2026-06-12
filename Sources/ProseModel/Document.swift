@@ -54,7 +54,7 @@ public struct Document: Codable, Hashable, Sendable {
         return nil
     }
 
-    public func splitBlock(at position: Position) throws -> (Document, TextSelection) {
+    public func splitBlock(at position: Position) throws -> (Document, TextSelection, Range<Position>) {
         guard let info = blockInfo(containing: position),
               info.node.type == "paragraph" || info.node.type == "heading" else {
             throw StepError.unsupportedReplacement("splitBlock requires a text block")
@@ -70,10 +70,15 @@ public struct Document: Codable, Hashable, Sendable {
         var blocks = root.content
         blocks.replaceSubrange(info.index...info.index, with: [first, second])
         let newBlockStart = info.start + first.nodeSize
-        return (Document(.doc(blocks)), TextSelection(anchor: newBlockStart + 1, head: newBlockStart + 1))
+        let changedRange = info.start..<(newBlockStart + second.nodeSize)
+        return (
+            Document(.doc(blocks)),
+            TextSelection(anchor: newBlockStart + 1, head: newBlockStart + 1),
+            changedRange
+        )
     }
 
-    public func joinBackward(at position: Position) throws -> (Document, TextSelection)? {
+    public func joinBackward(at position: Position) throws -> (Document, TextSelection, Range<Position>)? {
         guard let info = blockInfo(containing: position), info.index > 0, position == info.start + 1 else {
             return nil
         }
@@ -91,17 +96,22 @@ public struct Document: Codable, Hashable, Sendable {
 
         return (
             Document(.doc(blocks)),
-            TextSelection(anchor: previousTextEnd, head: previousTextEnd)
+            TextSelection(anchor: previousTextEnd, head: previousTextEnd),
+            previousTextEnd - previous.nodeSize + 1..<(previousTextEnd + current.nodeSize)
         )
     }
 
-    public func togglingHeading(at position: Position, level: Int) throws -> (Document, TextSelection) {
+    public func togglingHeading(at position: Position, level: Int) throws -> (Document, TextSelection, Range<Position>) {
         guard let info = blockInfo(containing: position) else {
             throw StepError.unsupportedReplacement("toggleHeading requires a text block")
         }
         var blocks = root.content
         blocks[info.index] = info.node.type == "heading" ? info.node.asParagraph() : info.node.asHeading(level: level)
-        return (Document(.doc(blocks)), TextSelection(anchor: position, head: position))
+        return (
+            Document(.doc(blocks)),
+            TextSelection(anchor: position, head: position),
+            info.start..<(info.start + blocks[info.index].nodeSize)
+        )
     }
 
     public func text(from: Position, to: Position) throws -> String {

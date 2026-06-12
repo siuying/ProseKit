@@ -63,10 +63,10 @@ import UIKit
         context.restoreGState()
     }
 
-    private func relayout() {
+    private func relayout(changedRange: Range<Position>? = nil) {
         guard bounds.width > 0 else { return }
         layoutStore.width = bounds.width
-        layoutBox = try? layoutStore.layout(state.document)
+        layoutBox = try? layoutStore.layout(state.document, changedRange: changedRange)
     }
 
     private func draw(block: LayoutBox, in context: CGContext) {
@@ -128,20 +128,20 @@ import UIKit
     private func insertPlainText(_ text: String) {
         inputDelegate?.textWillChange(self)
         try? state.insertText(text)
-        relayout()
+        relayout(changedRange: state.lastTransaction?.changedRange)
         setNeedsDisplay()
         inputDelegate?.textDidChange(self)
     }
 
     public func deleteBackward() {
         if (try? Commands.joinBackward().run(in: &state)) == true {
-            relayout()
+            relayout(changedRange: state.lastTransaction?.changedRange)
             setNeedsDisplay()
             return
         }
         inputDelegate?.textWillChange(self)
         try? state.deleteBackward()
-        relayout()
+        relayout(changedRange: state.lastTransaction?.changedRange)
         setNeedsDisplay()
         inputDelegate?.textDidChange(self)
     }
@@ -154,7 +154,8 @@ import UIKit
             state = EditorState(
                 document: state.document,
                 selection: range.textSelection,
-                dispatchedTransactions: state.dispatchedTransactions
+                lastTransaction: state.lastTransaction,
+                typingMarks: state.typingMarks
             )
             setNeedsDisplay()
             inputDelegate?.selectionDidChange(self)
@@ -208,7 +209,7 @@ import UIKit
             selection: TextSelection(anchor: from + text.count, head: from + text.count),
             origin: .local
         ))
-        relayout()
+        relayout(changedRange: state.lastTransaction?.changedRange)
         setNeedsDisplay()
         inputDelegate?.textDidChange(self)
     }
@@ -473,7 +474,7 @@ import UIKit
     private func runCommand(_ command: Command) {
         inputDelegate?.textWillChange(self)
         _ = try? command.run(in: &state)
-        relayout()
+        relayout(changedRange: state.lastTransaction?.changedRange)
         setNeedsDisplay()
         inputDelegate?.textDidChange(self)
     }

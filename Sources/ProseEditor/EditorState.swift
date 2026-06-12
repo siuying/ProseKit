@@ -4,18 +4,18 @@ import ProseModel
 public struct EditorState: Sendable {
     public private(set) var document: Document
     public private(set) var selection: TextSelection
-    public private(set) var dispatchedTransactions: [AppliedTransaction]
+    public private(set) var lastTransaction: AppliedTransaction?
     public private(set) var typingMarks: [Mark]
 
     public init(
         document: Document,
         selection: TextSelection? = nil,
-        dispatchedTransactions: [AppliedTransaction] = [],
+        lastTransaction: AppliedTransaction? = nil,
         typingMarks: [Mark] = []
     ) {
         self.document = document
         self.selection = selection ?? TextSelection(anchor: document.endTextPosition, head: document.endTextPosition)
-        self.dispatchedTransactions = dispatchedTransactions
+        self.lastTransaction = lastTransaction
         self.typingMarks = typingMarks
     }
 
@@ -25,7 +25,11 @@ public struct EditorState: Sendable {
         let head = from + text.count
         if !typingMarks.isEmpty, from == to {
             let updated = try document.replacingText(from: from, to: to, with: text, marks: typingMarks)
-            replaceDocument(updated, selection: TextSelection(anchor: head, head: head))
+            replaceDocument(
+                updated,
+                selection: TextSelection(anchor: head, head: head),
+                changedRange: from..<max(from + text.count, from + 1)
+            )
             return
         }
         try dispatch(Transaction(
@@ -53,13 +57,23 @@ public struct EditorState: Sendable {
         let applied = try transaction.apply(to: document)
         document = applied.document
         selection = applied.selection
-        dispatchedTransactions.append(applied)
+        lastTransaction = applied
     }
 
-    public mutating func replaceDocument(_ document: Document, selection: TextSelection, origin: Origin = .local) {
+    public mutating func replaceDocument(
+        _ document: Document,
+        selection: TextSelection,
+        origin: Origin = .local,
+        changedRange: Range<Position>
+    ) {
         self.document = document
         self.selection = selection
-        dispatchedTransactions.append(AppliedTransaction(document: document, selection: selection, origin: origin))
+        lastTransaction = AppliedTransaction(
+            document: document,
+            selection: selection,
+            origin: origin,
+            changedRange: changedRange
+        )
     }
 
     public mutating func toggleTypingMark(_ mark: Mark) {
