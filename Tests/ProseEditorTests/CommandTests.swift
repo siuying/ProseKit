@@ -73,6 +73,34 @@ final class CommandTests: XCTestCase {
         XCTAssertEqual(state.document.root.content[0].content[0].marks, [])
     }
 
+    func testSetLinkWrapsSelectionInLinkMark() throws {
+        var state = EditorState(document: Document(.doc([
+            .paragraph([.text("hello")]),
+        ])), selection: TextSelection(anchor: 2, head: 7))
+
+        XCTAssertTrue(try Commands.setLink(href: "https://example.com").run(in: &state))
+
+        let mark = state.document.root.content[0].content[0].marks.first
+        XCTAssertEqual(mark?.type, "link")
+        XCTAssertEqual(mark?.attrs["href"], .string("https://example.com"))
+    }
+
+    func testSetLinkDoesNothingOnCollapsedSelection() throws {
+        var state = EditorState(document: Document(.doc([
+            .paragraph([.text("hello")]),
+        ])), selection: TextSelection(anchor: 3, head: 3))
+
+        XCTAssertFalse(try Commands.setLink(href: "https://example.com").run(in: &state))
+    }
+
+    func testLinkDetectionRecognisesSoleURL() {
+        XCTAssertEqual(LinkDetection.soleURL(in: "https://example.com"), "https://example.com")
+        XCTAssertEqual(LinkDetection.soleURL(in: "  https://example.com/a?b=c  "), "https://example.com/a?b=c")
+        XCTAssertNil(LinkDetection.soleURL(in: "see https://example.com here"))
+        XCTAssertNil(LinkDetection.soleURL(in: "just words"))
+        XCTAssertNil(LinkDetection.soleURL(in: ""))
+    }
+
     func testCollapsedToggleMarkAppliesToNextInsertedText() throws {
         var state = EditorState(document: Document(.doc([
             .paragraph([.text("hi")]),

@@ -240,7 +240,7 @@ private func typesetLineFragments(
     let text = attributed.string
 
     guard !text.isEmpty else {
-        let height = BlockStyle.emptyLineHeight(for: block.type)
+        let height = BlockStyle.emptyLineHeight(for: block)
         return [
             LineFragment(
                 text: "",

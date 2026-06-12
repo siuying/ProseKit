@@ -85,6 +85,13 @@ produces a Transaction tagged with the history **Origin**; entries are carried
 forward across later edits via **Mapping**.
 _Avoid_: undo manager (that's the system bridge, not the record), undo stack
 
+**Opaque Node**:
+A **Node** whose type the editor doesn't understand but preserves: rendered as
+a placeholder, selected and deleted only as a whole, and exported byte-faithful
+to how it arrived. The guarantee that unsupported content survives a round trip.
+_Avoid_: unknown node (that's its cause, not its behavior), unsupported content
+(that's the rendering)
+
 **Schema**:
 The declared, extensible set of Node types and Mark types and their rules (which
 Nodes may contain which). The Document must conform to its Schema.

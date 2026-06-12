@@ -336,11 +336,72 @@ import UIKit
         for fragment in block.lineFragments {
             guard let typeset = fragment.typesetLine else { continue }
             let baseline = block.frame.minY + fragment.frame.minY + typeset.ascent
-            context.textPosition = CGPoint(
+            let origin = CGPoint(
                 x: block.frame.minX + fragment.frame.minX,
                 y: flipHeight - baseline
             )
+            drawHighlights(for: typeset.line, lineOrigin: origin, in: context)
+            context.textPosition = origin
             CTLineDraw(typeset.line, context)
+            drawStrikethrough(for: typeset.line, lineOrigin: origin, in: context)
+        }
+    }
+
+    /// Fills the background behind each run carrying a highlight colour, drawn
+    /// before the glyphs. The raw `color` value is parsed here (not at layout
+    /// time) so dark-mode palette colours resolve against the current traits;
+    /// an unparseable value draws nothing, the Mark surviving regardless.
+    private func drawHighlights(for line: CTLine, lineOrigin: CGPoint, in context: CGContext) {
+        let runs = CTLineGetGlyphRuns(line) as? [CTRun] ?? []
+        for run in runs {
+            let attributes = CTRunGetAttributes(run) as NSDictionary
+            guard let value = attributes[BlockStyle.highlightAttributeName] as? String,
+                  let color = HighlightColor.color(for: value) else { continue }
+            let stringRange = CTRunGetStringRange(run)
+            let startX = CTLineGetOffsetForStringIndex(line, stringRange.location, nil)
+            let endX = CTLineGetOffsetForStringIndex(line, stringRange.location + stringRange.length, nil)
+            var ascent: CGFloat = 0
+            var descent: CGFloat = 0
+            _ = CTRunGetTypographicBounds(run, CFRange(location: 0, length: 0), &ascent, &descent, nil)
+            let rect = CGRect(
+                x: lineOrigin.x + startX,
+                y: lineOrigin.y - descent,
+                width: endX - startX,
+                height: ascent + descent
+            )
+            context.saveGState()
+            context.setFillColor(color.cgColor)
+            context.fill(rect)
+            context.restoreGState()
+        }
+    }
+
+    /// CoreText draws underline but not strikethrough, so each run flagged by
+    /// `BlockStyle.strikethroughAttributeName` gets a manual stroke through the
+    /// x-height. Run geometry comes from the same CTLine the glyphs drew, so the
+    /// stroke stays exactly aligned with what was typeset.
+    private func drawStrikethrough(for line: CTLine, lineOrigin: CGPoint, in context: CGContext) {
+        let runs = CTLineGetGlyphRuns(line) as? [CTRun] ?? []
+        for run in runs {
+            let attributes = CTRunGetAttributes(run) as NSDictionary
+            guard attributes[BlockStyle.strikethroughAttributeName] != nil,
+                  let font = attributes[kCTFontAttributeName as String].map({ $0 as! CTFont }) else {
+                continue
+            }
+            let stringRange = CTRunGetStringRange(run)
+            let startX = CTLineGetOffsetForStringIndex(line, stringRange.location, nil)
+            let endX = CTLineGetOffsetForStringIndex(line, stringRange.location + stringRange.length, nil)
+            // A line through the middle of lowercase glyphs.
+            let y = lineOrigin.y + CTFontGetXHeight(font) / 2
+            let thickness = max(1, (CTFontGetSize(font) / 17).rounded())
+            context.saveGState()
+            // Match the glyph colour set in drawCanvas (foreground-from-context).
+            context.setStrokeColor(UIColor.label.cgColor)
+            context.setLineWidth(thickness)
+            context.move(to: CGPoint(x: lineOrigin.x + startX, y: y))
+            context.addLine(to: CGPoint(x: lineOrigin.x + endX, y: y))
+            context.strokePath()
+            context.restoreGState()
         }
     }
 
@@ -757,7 +818,12 @@ import UIKit
 
     public override func paste(_ sender: Any?) {
         guard let text = pasteboard.string else { return }
-        // insertText replaces the current selection and splits blocks at newlines.
+        // Pasting a URL onto a selection links the selection (Q6) instead of
+        // replacing it; anything else replaces, splitting blocks at newlines.
+        if !state.selection.isCollapsed, let href = LinkDetection.soleURL(in: text) {
+            runCommand(Commands.setLink(href: href))
+            return
+        }
         insertText(text)
     }
 

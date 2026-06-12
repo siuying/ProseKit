@@ -435,7 +435,7 @@ private extension Node {
 
         func marks(_ existing: [Mark]) -> [Mark] {
             if enabled {
-                return existing.contains(mark) ? existing : existing + [mark]
+                return MarkRules.adding(mark, to: existing)
             }
             return existing.filter { $0 != mark }
         }

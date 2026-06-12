@@ -39,4 +39,8 @@ public enum JSONValue: Codable, Hashable, Sendable {
     public var intValue: Int? {
         if case .int(let value) = self { value } else { nil }
     }
+
+    public var stringValue: String? {
+        if case .string(let value) = self { value } else { nil }
+    }
 }

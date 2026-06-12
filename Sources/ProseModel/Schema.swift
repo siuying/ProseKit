@@ -1,5 +1,8 @@
 public struct Schema: Sendable {
     public var nodes: Set<String>
+    /// The Mark types we render with a hook. No longer a validation gate:
+    /// unknown Marks are preserved, not rejected (ADR 0006). It enumerates the
+    /// supported set for consumers like the toolbar's active-state (a later slice).
     public var marks: Set<String>
 
     public init(nodes: Set<String>, marks: Set<String>) {
@@ -9,7 +12,7 @@ public struct Schema: Sendable {
 
     public static let slice1 = Schema(
         nodes: ["doc", "paragraph", "heading", "text"],
-        marks: ["bold", "italic", "code"]
+        marks: ["bold", "italic", "code", "strike", "underline", "highlight", "superscript", "subscript", "link"]
     )
 
     public func validate(_ document: Document) throws {
@@ -35,9 +38,9 @@ public struct Schema: Sendable {
             guard node.content.isEmpty else {
                 throw SchemaError.invalidDocument("text nodes cannot contain child nodes")
             }
-            for mark in node.marks where !marks.contains(mark.type) {
-                throw SchemaError.invalidDocument("unknown mark type \(mark.type)")
-            }
+            // Unknown mark types are preserved, not rejected: a Tiptap document
+            // may carry marks outside our supported set, and ADR 0006 keeps them
+            // in the model (rendered as plain text) so re-export is byte-faithful.
             return
         }
 
@@ -45,26 +48,11 @@ public struct Schema: Sendable {
             throw SchemaError.invalidDocument("marks are only allowed on text nodes")
         }
 
-        switch node.type {
-        case "doc":
-            try require(node.content.allSatisfy { $0.type == "paragraph" || $0.type == "heading" }, "\(node.type) may only contain block nodes")
-        case "paragraph":
-            try require(node.content.allSatisfy(\.isText), "paragraph may only contain text")
-        case "heading":
-            try require(node.content.allSatisfy(\.isText), "heading may only contain text")
-            let level = node.attrs["level"]?.intValue
-            try require((1...6).contains(level ?? 0), "heading requires a level from 1 through 6")
-        default:
-            break
-        }
+        try NodeRules.rule(for: node.type)?.validate(node)
 
         for child in node.content {
             try validate(child, parent: node)
         }
-    }
-
-    private func require(_ condition: Bool, _ message: String) throws {
-        guard condition else { throw SchemaError.invalidDocument(message) }
     }
 }
 

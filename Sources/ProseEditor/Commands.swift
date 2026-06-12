@@ -44,6 +44,20 @@ public enum Commands {
         }
     }
 
+    /// Wraps the (non-empty) selection in a link Mark. Used by the link popover
+    /// (slice 08) and by pasting a URL onto a selection.
+    public static func setLink(href: String) -> Command {
+        Command { state in
+            let lower = min(state.selection.anchor, state.selection.head)
+            let upper = max(state.selection.anchor, state.selection.head)
+            guard lower < upper else { return false }
+            let mark = Mark(type: "link", attrs: ["href": .string(href)])
+            let document = try state.document.addingMark(from: lower, to: upper, mark: mark)
+            state.replaceDocument(document, selection: state.selection, changedRange: lower..<upper)
+            return true
+        }
+    }
+
     public static func toggleMark(_ mark: Mark) -> Command {
         Command { state in
             let lower = min(state.selection.anchor, state.selection.head)
