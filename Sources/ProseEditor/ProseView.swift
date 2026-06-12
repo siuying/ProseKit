@@ -74,6 +74,107 @@ import UIKit
         verticalScrollIndicatorInsets.bottom = overlap
     }
 
+    // MARK: - Selection-drag edge autoscroll
+
+    /// UITextInteraction does not autoscroll when a selection-handle drag
+    /// holds at the Viewport edge (verified on device 2026-06-12; see
+    /// .scratch/scrolling/issues/01), so the view drives it: the system's
+    /// range-adjustment pan is observed via addTarget, and while the drag
+    /// sits in an edge band a display link scrolls the Viewport and extends
+    /// the Selection head to the Position passing under the finger.
+    private static let autoscrollBand: CGFloat = 44
+    private static let autoscrollMaxStep: CGFloat = 8
+
+    private var autoscrollStep: CGFloat = 0
+    private var autoscrollDragLocation: CGPoint = .zero
+    private var autoscrollDisplayLink: CADisplayLink?
+    private var hookedDragGestures: Set<ObjectIdentifier> = []
+
+    public override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window == nil {
+            stopSelectionDragAutoscroll()
+        } else {
+            hookSelectionDragGestures()
+        }
+    }
+
+    /// The range-adjustment recognizer is the system's selection-handle
+    /// drag. Matching by type name is the only public seam; the hook test
+    /// pins that the running OS still exposes it.
+    private func hookSelectionDragGestures() {
+        for gesture in gestureRecognizers ?? [] {
+            let id = ObjectIdentifier(gesture)
+            guard !hookedDragGestures.contains(id),
+                  String(describing: type(of: gesture)).contains("RangeAdjustment") else { continue }
+            gesture.addTarget(self, action: #selector(selectionDragGestureChanged(_:)))
+            hookedDragGestures.insert(id)
+        }
+    }
+
+    var hasSelectionDragHook: Bool {
+        hookSelectionDragGestures()
+        return !hookedDragGestures.isEmpty
+    }
+
+    @objc private func selectionDragGestureChanged(_ gesture: UIGestureRecognizer) {
+        switch gesture.state {
+        case .began, .changed:
+            updateSelectionDragAutoscroll(forDragAt: gesture.location(in: self))
+        default:
+            stopSelectionDragAutoscroll()
+        }
+    }
+
+    /// `location` is in content space (the view's own coordinates). Inside
+    /// the top/bottom edge band the scroll step ramps with penetration.
+    func updateSelectionDragAutoscroll(forDragAt location: CGPoint) {
+        autoscrollDragLocation = location
+        let visible = bounds.inset(by: adjustedContentInset)
+        let band = min(Self.autoscrollBand, visible.height / 3)
+        if location.y > visible.maxY - band {
+            autoscrollStep = Self.autoscrollMaxStep * min(1, (location.y - (visible.maxY - band)) / band)
+        } else if location.y < visible.minY + band {
+            autoscrollStep = -Self.autoscrollMaxStep * min(1, ((visible.minY + band) - location.y) / band)
+        } else {
+            autoscrollStep = 0
+        }
+        if autoscrollStep == 0 {
+            stopSelectionDragAutoscroll()
+        } else if autoscrollDisplayLink == nil, window != nil {
+            let link = CADisplayLink(target: self, selector: #selector(selectionDragDisplayLinkFired))
+            link.add(to: .main, forMode: .common)
+            autoscrollDisplayLink = link
+        }
+    }
+
+    @objc private func selectionDragDisplayLinkFired() {
+        selectionDragAutoscrollTick()
+    }
+
+    /// One autoscroll frame: scroll by the current step (clamped to the
+    /// content), carry the stationary finger's content-space location with
+    /// the scroll, and extend the Selection head to the Position under it.
+    func selectionDragAutoscrollTick() {
+        guard autoscrollStep != 0, layoutBox != nil else { return }
+        let minY = -adjustedContentInset.top
+        let maxY = max(minY, contentSize.height + adjustedContentInset.bottom - bounds.height)
+        let target = min(max(contentOffset.y + autoscrollStep, minY), maxY)
+        guard target != contentOffset.y else { return }
+        let delta = target - contentOffset.y
+        contentOffset.y = target
+        autoscrollDragLocation.y += delta
+        if let head = closestPosition(to: autoscrollDragLocation) as? ProseTextPosition {
+            selectedTextRange = ProseTextRange(anchor: state.selection.anchor, head: head.position)
+        }
+    }
+
+    private func stopSelectionDragAutoscroll() {
+        autoscrollStep = 0
+        autoscrollDisplayLink?.invalidate()
+        autoscrollDisplayLink = nil
+    }
+
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) is not supported")

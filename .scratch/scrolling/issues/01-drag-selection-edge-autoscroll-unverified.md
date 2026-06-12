@@ -1,6 +1,6 @@
 # 01 — Drag-selection edge autoscroll unverified
 
-Status: ready-for-human
+Status: ready-for-human (fallback implemented; needs device re-verification)
 
 ## What to verify
 
@@ -36,3 +36,23 @@ selection-handle drag (observable via `selectionWillChange`/
 display link while the touch stays inside an edge band. Keep
 `scrollCaretToVisible` out of that path (see the caret-follow decision:
 mid-drag reveals must not fight the drag).
+
+## Comments
+
+**2026-06-12 (maintainer, iPad):** Verified manually — the system does NOT
+autoscroll. Selecting text and dragging the end handle to the bottom edge
+extends the selection but never scrolls.
+
+**2026-06-12 (agent):** Fallback implemented in `ProseView`: the system's
+range-adjustment pan recognizer is observed via `addTarget` (matched by
+type name — `testSystemSelectionDragGestureIsHooked` pins that the OS
+still exposes it). While the drag sits in a 44pt edge band, a display
+link scrolls the Viewport (step ramps with band penetration, clamped to
+the content) and extends the Selection head to the Position passing under
+the stationary finger. Covered by four `ScrollingTests`.
+
+Remaining for a human:
+- Re-run the manual steps above on device — the unit tests drive the seam
+  below the real gesture, so the end-to-end handle drag still needs eyes.
+- Caret drags (collapsed selection) are not autoscrolled yet; only range
+  handle drags are. Extend if it feels wrong in use.
