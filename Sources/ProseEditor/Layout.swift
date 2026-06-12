@@ -89,12 +89,15 @@ public struct LayoutEngine: Sendable {
     public func layout(_ document: Document, width: CGFloat) throws -> LayoutBox {
         try schema.validate(document)
         var y: CGFloat = 0
-        var position = 1
         let children = document.root.content.enumerated().map { index, block -> LayoutBox in
-            let range = position..<(position + block.nodeSize)
-            let box = typesetLeafBlock(block, width: width, y: y, positionRange: range, typesetID: index + 1)
+            let box = typesetLeafBlock(
+                block,
+                width: width,
+                y: y,
+                positionRange: blockRange(at: index, in: document),
+                typesetID: index + 1
+            )
             y = box.frame.maxY + 12
-            position = range.upperBound
             return box
         }
         let height = children.last.map(\.frame.maxY) ?? 0
@@ -103,9 +106,20 @@ public struct LayoutEngine: Sendable {
             node: document.root,
             frame: CGRect(x: 0, y: 0, width: width, height: height),
             children: children,
-            positionRange: 0..<document.root.nodeSize
+            positionRange: 0..<(document.endPosition + 1)
         )
     }
+}
+
+/// Block i's position range from the Document's block index — O(1), unlike
+/// `node.nodeSize`, which re-counts the block's text on every call. Blocks
+/// tile the position space, so the range ends where the next block starts.
+private func blockRange(at index: Int, in document: Document) -> Range<Position> {
+    let start = document.position(ofBlockAt: index) ?? 1
+    let end = index + 1 < document.blockCount
+        ? (document.position(ofBlockAt: index + 1) ?? start)
+        : document.endPosition
+    return start..<end
 }
 
 public struct IncrementalLayoutStore: Sendable {
@@ -113,43 +127,62 @@ public struct IncrementalLayoutStore: Sendable {
     public var width: CGFloat
 
     private var previous: LayoutBox?
+    private var previousWidth: CGFloat
     private var nextTypesetID: Int
 
     public init(schema: Schema, width: CGFloat) {
         self.schema = schema
         self.width = width
+        self.previousWidth = width
         self.nextTypesetID = 1
     }
 
+    /// Relayouts the document, re-typesetting only the blocks the Changed
+    /// Range touches. Per-block work for untouched blocks must stay O(1) —
+    /// no `nodeSize` (re-counts the block's text) and no `node ==` content
+    /// comparison (the Changed Range is authoritative; the rendering-
+    /// equivalence tests pin that trust). Issue 07: the previous walk made
+    /// every keystroke O(document).
     public mutating func layout(_ document: Document, changedRange: Range<Position>? = nil) throws -> LayoutBox {
-        try schema.validate(document)
-        var y: CGFloat = 0
-        var position = 1
         let oldChildren = previous?.children ?? []
-        let tailIndexDelta = oldChildren.count - document.root.content.count
+        // A width change invalidates every cached typeset; reuse is only
+        // sound against a previous layout at the same width.
+        let reuseRange = (previous != nil && width == previousWidth) ? changedRange : nil
+        if reuseRange == nil {
+            try schema.validate(document)
+        }
+        let blockCount = document.blockCount
+        let tailIndexDelta = oldChildren.count - blockCount
 
-        let children = document.root.content.enumerated().map { index, block -> LayoutBox in
-            let range = position..<(position + block.nodeSize)
-            defer { position = range.upperBound }
-            let oldIndex: Int
-            if let changedRange, range.lowerBound >= changedRange.upperBound {
-                oldIndex = index + tailIndexDelta
-            } else {
-                oldIndex = index
+        var children: [LayoutBox] = []
+        children.reserveCapacity(blockCount)
+        var y: CGFloat = 0
+        for index in 0..<blockCount {
+            let range = blockRange(at: index, in: document)
+
+            if let reuseRange, !rangesIntersect(range, reuseRange) {
+                // Blocks past the edit keep their old layout but sit at a
+                // shifted index when the edit split or joined blocks.
+                let oldIndex = range.lowerBound >= reuseRange.upperBound ? index + tailIndexDelta : index
+                if oldChildren.indices.contains(oldIndex) {
+                    let old = oldChildren[oldIndex]
+                    if old.frame.origin.y == y, old.positionRange == range {
+                        children.append(old)
+                    } else {
+                        children.append(old.moved(toY: y, positionRange: range))
+                    }
+                    y += old.frame.height + 12
+                    continue
+                }
             }
 
-            if let changedRange,
-               !rangesIntersect(range, changedRange),
-               oldChildren.indices.contains(oldIndex),
-               oldChildren[oldIndex].node == block {
-                let reused = oldChildren[oldIndex].moved(toY: y, positionRange: range)
-                y = reused.frame.maxY + 12
-                return reused
+            let block = document.root.content[index]
+            if reuseRange != nil {
+                try schema.validate(block: block)
             }
-
             let box = typesetLeafBlock(block, width: width, y: y, positionRange: range, typesetID: allocateTypesetID())
             y = box.frame.maxY + 12
-            return box
+            children.append(box)
         }
 
         let root = LayoutBox(
@@ -157,9 +190,10 @@ public struct IncrementalLayoutStore: Sendable {
             node: document.root,
             frame: CGRect(x: 0, y: 0, width: width, height: children.last?.frame.maxY ?? 0),
             children: children,
-            positionRange: 0..<document.root.nodeSize
+            positionRange: 0..<(document.endPosition + 1)
         )
         previous = root
+        previousWidth = width
         return root
     }
 

@@ -100,3 +100,15 @@ both scenarios; the previous night's clean run had rsd 7%). The rsd ≤ 20%
 target is only meaningful on a quiet machine; the delete/typing *ratio*
 was stable across all three measurements. No model or view change is
 warranted.
+
+### 2026-06-12 — gate reopened by the larger fixture, re-closed under issue 07
+
+The full-story fixture (905-block manyPages) reopened the variance: rsd
+61% with a cooling trend (1.22 s → 0.23 s across iterations). Two causes,
+both fixed under issue 07: the editing path's O(document) per-keystroke
+terms amplified everything (steady-state was 4.6 ms/key), and the
+insert/delete warm-up never crossed a block boundary, so the measured
+iterations absorbed the joinBackward cold start. After the issue 07 fix
+plus a delete-specific warm-up in `testDeleteBackwardManyPagesProse`:
+0.68–0.94 ms/key, rsd 19.8% / 32.7% across two runs, delete/typing ratio
+1.2–1.7× — under the 2× bar.

@@ -301,6 +301,16 @@ final class PerformanceTests: XCTestCase {
     func testDeleteBackwardManyPagesProse() {
         let document = makeDocument(TheLastQuestion.manyPages)
         warmUpEditingPath(TheLastQuestion.manyPages)
+        // warmUpEditingPath deletes only characters it just typed; a real
+        // delete run also crosses block boundaries (joinBackward typesets
+        // the merged block), so the first measured iterations otherwise
+        // absorb that cold start (rsd 87% with a cooling trend at 905
+        // blocks). Warm the exact measured operation once.
+        let deleteWarmUp = makeProseView(document)
+        deleteWarmUp.layoutIfNeeded()
+        for _ in 0..<Self.keystrokes {
+            deleteWarmUp.deleteBackward()
+        }
         measureMetrics([.wallClockTime], automaticallyStartMeasuring: false) {
             MainActor.assumeIsolated {
                 let view = makeProseView(document)

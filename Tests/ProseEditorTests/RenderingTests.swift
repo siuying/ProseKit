@@ -63,6 +63,25 @@ final class RenderingTests: XCTestCase {
         assertRendersLikeFreshView(view, "join moves every block below; all of it must repaint")
     }
 
+    /// Issue 07 removed the layout store's per-block content comparison; the
+    /// Changed Range alone decides reuse. Typing at the document start shifts
+    /// every block below (the all-tail reuse path); these renders catch any
+    /// stale geometry that trust could let through.
+    func testTypingAtDocumentStartRendersLikeFreshView() {
+        let view = makeView(fixture)
+        view.selectedTextRange = ProseTextRange(anchor: 2, head: 2)
+        view.insertText("hello")
+        assertRendersLikeFreshView(view, "edit at the start must shift and repaint everything below")
+    }
+
+    /// Typing at the document end reuses every block above untouched (the
+    /// all-prefix reuse path).
+    func testTypingAtDocumentEndRendersLikeFreshView() {
+        let view = makeView(fixture)
+        view.insertText("hello")
+        assertRendersLikeFreshView(view, "edit at the end must leave every block above intact")
+    }
+
     func testDeleteShrinkingAVisibleBlockRendersLikeFreshView() {
         let view = makeView(fixture)
         guard let textStart = view.document.position(ofTextInBlockAt: 1),

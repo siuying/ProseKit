@@ -25,6 +25,11 @@ public struct Document: Codable, Hashable, Sendable {
         self.index = Self.makeIndex(of: root)
     }
 
+    private init(root: Node, index: BlockIndex) {
+        self.root = root
+        self.index = index
+    }
+
     public init(from decoder: Decoder) throws {
         root = try Node(from: decoder)
         index = Self.makeIndex(of: root)
@@ -76,6 +81,90 @@ public struct Document: Codable, Hashable, Sendable {
 
     public var blockCount: Int {
         index.blockStarts.count
+    }
+
+    /// Document with blocks[range] replaced by `newBlocks`. The index is
+    /// derived, not rebuilt: only the new blocks are measured, and the tail
+    /// entries shift by constant deltas. Rebuilding (`makeIndex`) re-counts
+    /// every block's text, which made each keystroke O(document).
+    private func replacingBlocks(in range: Range<Int>, with newBlocks: [Node]) -> Document {
+        var blocks = root.content
+        blocks.replaceSubrange(range, with: newBlocks)
+        return Document(
+            root: root.withContent(blocks),
+            index: derivedIndex(replacingBlocksIn: range, with: newBlocks)
+        )
+    }
+
+    /// Document adopting `newRoot`, which differs from the current root only
+    /// in the block at `blockIndex`; same index derivation as above.
+    private func replacing(root newRoot: Node, blockAt blockIndex: Int) -> Document {
+        Document(
+            root: newRoot,
+            index: derivedIndex(
+                replacingBlocksIn: blockIndex..<(blockIndex + 1),
+                with: [newRoot.content[blockIndex]]
+            )
+        )
+    }
+
+    private func derivedIndex(replacingBlocksIn range: Range<Int>, with newBlocks: [Node]) -> BlockIndex {
+        var starts = index.blockStarts
+        var textCounts = index.blockTextCounts
+        var charStarts = index.blockCharStarts
+        let totalCharacters = (charStarts.last ?? 0) + (textCounts.last ?? 0)
+
+        var position = range.lowerBound < starts.count ? starts[range.lowerBound] : index.endPosition
+        var characters = range.lowerBound < charStarts.count ? charStarts[range.lowerBound] : totalCharacters
+        let oldTailPosition = range.upperBound < starts.count ? starts[range.upperBound] : index.endPosition
+        let oldTailCharacters = range.upperBound < charStarts.count ? charStarts[range.upperBound] : totalCharacters
+
+        var newStarts: [Position] = []
+        var newTextCounts: [Int] = []
+        var newCharStarts: [Int] = []
+        newStarts.reserveCapacity(newBlocks.count)
+        newTextCounts.reserveCapacity(newBlocks.count)
+        newCharStarts.reserveCapacity(newBlocks.count)
+        for block in newBlocks {
+            newStarts.append(position)
+            newCharStarts.append(characters)
+            let count = block.plainText.count
+            newTextCounts.append(count)
+            characters += count
+            position += block.nodeSize
+        }
+
+        let positionDelta = position - oldTailPosition
+        let characterDelta = characters - oldTailCharacters
+        starts.replaceSubrange(range, with: newStarts)
+        textCounts.replaceSubrange(range, with: newTextCounts)
+        charStarts.replaceSubrange(range, with: newCharStarts)
+        let tailStart = range.lowerBound + newBlocks.count
+        if positionDelta != 0 {
+            for tailIndex in tailStart..<starts.count {
+                starts[tailIndex] += positionDelta
+            }
+        }
+        if characterDelta != 0 {
+            for tailIndex in tailStart..<charStarts.count {
+                charStarts[tailIndex] += characterDelta
+            }
+        }
+
+        let endPosition = index.endPosition + positionDelta
+        let endTextPosition: Position
+        if let lastStart = starts.last, let lastCount = textCounts.last {
+            endTextPosition = lastStart + 1 + lastCount
+        } else {
+            endTextPosition = endPosition
+        }
+        return BlockIndex(
+            blockStarts: starts,
+            blockTextCounts: textCounts,
+            blockCharStarts: charStarts,
+            endPosition: endPosition,
+            endTextPosition: endTextPosition
+        )
     }
 
     public func position(ofBlockAt blockIndex: Int) -> Position? {
@@ -141,12 +230,10 @@ public struct Document: Codable, Hashable, Sendable {
         let after = String(text[splitIndex...])
         let first = info.node.withContent([.text(before)])
         let second = info.node.withContent([.text(after)])
-        var blocks = root.content
-        blocks.replaceSubrange(info.index...info.index, with: [first, second])
         let newBlockStart = info.start + first.nodeSize
         let changedRange = info.start..<(newBlockStart + second.nodeSize)
         return (
-            Document(.doc(blocks)),
+            replacingBlocks(in: info.index..<(info.index + 1), with: [first, second]),
             TextSelection(anchor: newBlockStart + 1, head: newBlockStart + 1),
             changedRange
         )
@@ -156,20 +243,20 @@ public struct Document: Codable, Hashable, Sendable {
         guard let info = blockInfo(containing: position), info.index > 0, position == info.start + 1 else {
             return nil
         }
-        var blocks = root.content
-        let previous = blocks[info.index - 1]
-        let current = blocks[info.index]
+        let previous = root.content[info.index - 1]
+        let current = root.content[info.index]
         let previousTextEnd = info.start - 1
 
-        if current.plainText.isEmpty {
-            blocks.remove(at: info.index)
+        let joined: Document
+        if textCount(ofBlockAt: info.index) == 0 {
+            joined = replacingBlocks(in: info.index..<(info.index + 1), with: [])
         } else {
-            blocks[info.index - 1] = previous.withContent([.text(previous.plainText + current.plainText)])
-            blocks.remove(at: info.index)
+            let merged = previous.withContent([.text(previous.plainText + current.plainText)])
+            joined = replacingBlocks(in: (info.index - 1)..<(info.index + 1), with: [merged])
         }
 
         return (
-            Document(.doc(blocks)),
+            joined,
             TextSelection(anchor: previousTextEnd, head: previousTextEnd),
             previousTextEnd - previous.nodeSize + 1..<(previousTextEnd + current.nodeSize)
         )
@@ -179,12 +266,11 @@ public struct Document: Codable, Hashable, Sendable {
         guard let info = blockInfo(containing: position) else {
             throw StepError.unsupportedReplacement("toggleHeading requires a text block")
         }
-        var blocks = root.content
-        blocks[info.index] = info.node.type == "heading" ? info.node.asParagraph() : info.node.asHeading(level: level)
+        let toggled = info.node.type == "heading" ? info.node.asParagraph() : info.node.asHeading(level: level)
         return (
-            Document(.doc(blocks)),
+            replacingBlocks(in: info.index..<(info.index + 1), with: [toggled]),
             TextSelection(anchor: position, head: position),
-            info.start..<(info.start + blocks[info.index].nodeSize)
+            info.start..<(info.start + toggled.nodeSize)
         )
     }
 
@@ -203,16 +289,21 @@ public struct Document: Codable, Hashable, Sendable {
             throw StepError.unsupportedReplacement("replacement range must stay inside one text node")
         }
         if !marks.isEmpty, from == to, range.path.count == 2 {
-            return Document(root.replacingTextNodeWithMarkedInsertion(
-                atPath: range.path,
-                offset: range.text.distance(from: range.text.startIndex, to: range.range.lowerBound),
-                insertedText: insertedText,
-                marks: marks
-            ))
+            return replacing(
+                root: root.replacingTextNodeWithMarkedInsertion(
+                    atPath: range.path,
+                    offset: range.text.distance(from: range.text.startIndex, to: range.range.lowerBound),
+                    insertedText: insertedText,
+                    marks: marks
+                ),
+                blockAt: range.path[0]
+            )
         }
         var updated = range.text
         updated.replaceSubrange(range.range, with: insertedText)
-        return Document(root.replacingTextNode(atPath: range.path, with: updated))
+        let newRoot = root.replacingTextNode(atPath: range.path, with: updated)
+        guard range.path.count == 2 else { return Document(newRoot) }
+        return replacing(root: newRoot, blockAt: range.path[0])
     }
 
     public func addingMark(from: Position, to: Position, mark: Mark) throws -> Document {
@@ -232,26 +323,35 @@ public struct Document: Codable, Hashable, Sendable {
         guard let range = textRange(from: from, to: to) else {
             throw StepError.unsupportedReplacement("mark range must stay inside one text node")
         }
-        return Document(root.settingMark(
+        let newRoot = root.settingMark(
             atPath: range.path,
             lowerOffset: range.text.distance(from: range.text.startIndex, to: range.range.lowerBound),
             upperOffset: range.text.distance(from: range.text.startIndex, to: range.range.upperBound),
             mark: mark,
             enabled: enabled
-        ))
+        )
+        guard range.path.count == 2 else { return Document(newRoot) }
+        return replacing(root: newRoot, blockAt: range.path[0])
     }
 
+    /// Locates the text node containing `from...to`: binary search for the
+    /// block, then a scan of that block's text runs. Blocks are flat in
+    /// slice 1 (paragraph/heading of text runs), so a whole-tree walk here
+    /// only added an O(document) term to every edit.
     private func textRange(from: Position, to: Position) -> TextRange? {
-        var found: TextRange?
-        root.walkTextNodes(start: 0, path: []) { path, textStart, text in
-            guard found == nil else { return }
+        guard let info = blockInfo(containing: from) else { return nil }
+        var textStart = info.start + 1
+        for (childIndex, child) in info.node.content.enumerated() where child.isText {
+            let text = child.text ?? ""
             let textEnd = textStart + text.count
-            guard from >= textStart, to <= textEnd else { return }
-            let startIndex = text.index(text.startIndex, offsetBy: from - textStart)
-            let endIndex = text.index(text.startIndex, offsetBy: to - textStart)
-            found = TextRange(path: path, text: text, range: startIndex..<endIndex)
+            if from >= textStart, to <= textEnd {
+                let startIndex = text.index(text.startIndex, offsetBy: from - textStart)
+                let endIndex = text.index(text.startIndex, offsetBy: to - textStart)
+                return TextRange(path: [info.index, childIndex], text: text, range: startIndex..<endIndex)
+            }
+            textStart = textEnd
         }
-        return found
+        return nil
     }
 }
 
@@ -281,19 +381,6 @@ private extension Node {
             return text?.contains(needle) ?? false
         }
         return content.contains { $0.containsText(needle) }
-    }
-
-    func walkTextNodes(start: Position, path: [Int], visit: ([Int], Position, String) -> Void) {
-        if isText {
-            visit(path, start, text ?? "")
-            return
-        }
-
-        var position = start + 1
-        for (index, child) in content.enumerated() {
-            child.walkTextNodes(start: position, path: path + [index], visit: visit)
-            position += child.nodeSize
-        }
     }
 
     func replacingTextNode(atPath path: [Int], with text: String) -> Node {
