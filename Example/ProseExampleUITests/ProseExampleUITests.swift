@@ -1,0 +1,45 @@
+import XCTest
+
+/// Types through the real input stack — keyboard, autocorrect, tokenizer,
+/// UITextInteraction — which the package benchmarks bypass by calling
+/// insertText directly. Guards against the 2026-06-12 live-keyboard stall
+/// (O(blocks²) document reads between keystrokes; see
+/// .scratch/editing-performance/issues/04-live-keyboard-path-stall.md):
+/// before the fix, focusing an 800-paragraph document stalled the main
+/// thread for ~23 seconds and every keystroke cost ~180 ms.
+final class ProseExampleUITests: XCTestCase {
+    override func setUpWithError() throws {
+        continueAfterFailure = false
+    }
+
+    @MainActor
+    func testLiveTypingAroundAParagraphBreakStaysResponsive() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-paragraphs", "800"]
+        app.launch()
+
+        // Tap the editor so the XCUI event synthesizer sees keyboard focus
+        // (programmatic becomeFirstResponder is not enough for it).
+        let editor = app.textViews.firstMatch
+        XCTAssertTrue(editor.waitForExistence(timeout: 10))
+        editor.tap()
+        sleep(2)
+
+        func timedType(_ text: String, label: String) -> TimeInterval {
+            let start = Date()
+            app.typeText(text)
+            let elapsed = Date().timeIntervalSince(start)
+            print("[live-typing] \(label): \(String(format: "%.3f", elapsed))s")
+            return elapsed
+        }
+
+        // XCUITest event synthesis has its own per-keystroke overhead of
+        // roughly a second, so the bound is deliberately loose; the bug this
+        // guards against blew past it by an order of magnitude.
+        let budget: TimeInterval = 5
+        XCTAssertLessThan(timedType("a", label: "first char after focusing"), budget)
+        XCTAssertLessThan(timedType("\n", label: "Return (new line)"), budget)
+        XCTAssertLessThan(timedType("b", label: "first char after Return"), budget)
+        XCTAssertLessThan(timedType("c", label: "second char after Return"), budget)
+    }
+}

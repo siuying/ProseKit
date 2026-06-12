@@ -1,15 +1,33 @@
 public struct Document: Codable, Hashable, Sendable {
     public private(set) var root: Node
-    private var endTextPositionValue: Position
+
+    /// Per-block position and character arithmetic is precomputed once per
+    /// Document. Documents are immutable — editing produces a new Document —
+    /// so the index cannot go stale, and the paths UIKit hammers between
+    /// keystrokes (text(in:), offset math, blockInfo) stay O(log blocks)
+    /// instead of re-walking the tree per call.
+    private struct BlockIndex: Hashable, Sendable {
+        /// blockStarts[i] is the Position of block i's opening token.
+        var blockStarts: [Position]
+        /// blockTextCounts[i] is block i's plainText character count.
+        var blockTextCounts: [Int]
+        /// blockCharStarts[i] is the sum of plainText counts before block i.
+        var blockCharStarts: [Int]
+        /// Position just past the last block (root.nodeSize - 1).
+        var endPosition: Position
+        var endTextPosition: Position
+    }
+
+    private var index: BlockIndex
 
     public init(_ root: Node) {
         self.root = root
-        self.endTextPositionValue = Self.endTextPosition(in: root)
+        self.index = Self.makeIndex(of: root)
     }
 
     public init(from decoder: Decoder) throws {
         root = try Node(from: decoder)
-        endTextPositionValue = Self.endTextPosition(in: root)
+        index = Self.makeIndex(of: root)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -17,26 +35,73 @@ public struct Document: Codable, Hashable, Sendable {
     }
 
     public var endPosition: Int {
-        root.nodeSize - 1
+        index.endPosition
     }
 
     public var endTextPosition: Position {
-        endTextPositionValue
+        index.endTextPosition
     }
 
-    private static func endTextPosition(in root: Node) -> Position {
-        guard let lastBlock = root.content.last else { return root.nodeSize - 1 }
-        let lastBlockStart = root.nodeSize - 1 - lastBlock.nodeSize
-        return lastBlockStart + 1 + lastBlock.plainText.count
+    private static func makeIndex(of root: Node) -> BlockIndex {
+        var starts: [Position] = []
+        var textCounts: [Int] = []
+        var charStarts: [Int] = []
+        starts.reserveCapacity(root.content.count)
+        textCounts.reserveCapacity(root.content.count)
+        charStarts.reserveCapacity(root.content.count)
+        var position: Position = 1
+        var characters = 0
+        for block in root.content {
+            starts.append(position)
+            charStarts.append(characters)
+            let count = block.plainText.count
+            textCounts.append(count)
+            characters += count
+            position += block.nodeSize
+        }
+        let endTextPosition: Position
+        if let lastStart = starts.last, let lastCount = textCounts.last {
+            endTextPosition = lastStart + 1 + lastCount
+        } else {
+            endTextPosition = position
+        }
+        return BlockIndex(
+            blockStarts: starts,
+            blockTextCounts: textCounts,
+            blockCharStarts: charStarts,
+            endPosition: position,
+            endTextPosition: endTextPosition
+        )
+    }
+
+    public var blockCount: Int {
+        index.blockStarts.count
     }
 
     public func position(ofBlockAt blockIndex: Int) -> Position? {
-        guard root.content.indices.contains(blockIndex) else { return nil }
-        return 1 + root.content[..<blockIndex].reduce(0) { $0 + $1.nodeSize }
+        guard index.blockStarts.indices.contains(blockIndex) else { return nil }
+        return index.blockStarts[blockIndex]
     }
 
     public func position(ofTextInBlockAt blockIndex: Int) -> Position? {
         position(ofBlockAt: blockIndex).map { $0 + 1 }
+    }
+
+    /// plainText character count of the block, without materializing it.
+    public func textCount(ofBlockAt blockIndex: Int) -> Int? {
+        guard index.blockTextCounts.indices.contains(blockIndex) else { return nil }
+        return index.blockTextCounts[blockIndex]
+    }
+
+    /// Sum of plainText character counts of all blocks before this one.
+    public func textCharacters(beforeBlockAt blockIndex: Int) -> Int? {
+        guard index.blockCharStarts.indices.contains(blockIndex) else { return nil }
+        return index.blockCharStarts[blockIndex]
+    }
+
+    /// plainText character count of the whole document (no block separators).
+    public var totalTextCount: Int {
+        (index.blockCharStarts.last ?? 0) + (index.blockTextCounts.last ?? 0)
     }
 
     public var plainText: String {
@@ -47,16 +112,20 @@ public struct Document: Codable, Hashable, Sendable {
         root.containsText(needle)
     }
 
+    /// Blocks tile the position space contiguously, so this is a binary
+    /// search. A block-boundary position (end of block i == start of block
+    /// i+1) belongs to block i, matching the original first-match scan.
     public func blockInfo(containing position: Position) -> BlockInfo? {
-        var start = 1
-        for (index, block) in root.content.enumerated() {
-            let end = start + block.nodeSize
-            if position >= start, position <= end {
-                return BlockInfo(index: index, node: block, start: start)
-            }
-            start = end
+        let starts = index.blockStarts
+        guard !starts.isEmpty, position >= starts[0], position <= index.endPosition else { return nil }
+        var low = 0
+        var high = starts.count - 1
+        while low < high {
+            let mid = (low + high + 1) / 2
+            if starts[mid] <= position { low = mid } else { high = mid - 1 }
         }
-        return nil
+        let blockIndex = (low > 0 && starts[low] == position) ? low - 1 : low
+        return BlockInfo(index: blockIndex, node: root.content[blockIndex], start: starts[blockIndex])
     }
 
     public func splitBlock(at position: Position) throws -> (Document, TextSelection, Range<Position>) {

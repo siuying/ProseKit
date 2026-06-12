@@ -175,8 +175,19 @@ final class PerformanceTests: XCTestCase {
         }
     }
 
+    /// Mirrors what UIKit's keyboard machinery was observed to do around
+    /// every live keystroke (instrumented 2026-06-12, see
+    /// .scratch/editing-performance/issues/04-live-keyboard-path-stall.md):
+    /// read the whole document via text(in:), compute the caret's character
+    /// offset from the document start, query caret/selection geometry, step
+    /// the caret by one character, and run a layout pass dirtied by the
+    /// selection chrome's subview changes.
     private func exerciseUIKitInteractionPath(on view: ProseView) {
         guard let selection = view.selectedTextRange as? ProseTextRange else { return }
+        if let wholeDocument = view.textRange(from: view.beginningOfDocument, to: view.endOfDocument) {
+            _ = view.text(in: wholeDocument)
+        }
+        _ = view.offset(from: view.beginningOfDocument, to: selection.end)
         _ = view.caretRect(for: selection.end)
         _ = view.selectionRects(for: ProseTextRange(
             anchor: max(2, selection.head - 1),
@@ -185,6 +196,8 @@ final class PerformanceTests: XCTestCase {
         if let moved = view.position(from: selection.end, offset: -1) {
             _ = view.position(from: moved, offset: 1)
         }
+        view.setNeedsLayout()
+        view.layoutIfNeeded()
     }
 
     private func measureTypingUITextView(_ paragraphs: [String], atStart: Bool = false) {

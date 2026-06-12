@@ -24,3 +24,28 @@ targets:
         INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         TARGETED_DEVICE_FAMILY: "1,2"
+  ProseExampleUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - ProseExampleUITests
+    dependencies:
+      - target: ProseExample
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.siuying.ProseExampleUITests
+        TEST_TARGET_NAME: ProseExample
+schemes:
+  ProseExample:
+    build:
+      targets:
+        ProseExample: all
+        ProseExampleUITests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - ProseExampleUITests

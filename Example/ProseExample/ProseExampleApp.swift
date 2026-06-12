@@ -28,6 +28,18 @@ private struct ProseDocumentView: UIViewRepresentable {
     }
 
     private static let document: Document = {
+        // -paragraphs N loads a large synthetic document instead, for
+        // exercising editing performance at document scale (used by the
+        // ProseExampleUITests live-keyboard test).
+        if let index = CommandLine.arguments.firstIndex(of: "-paragraphs"),
+           CommandLine.arguments.indices.contains(index + 1),
+           let count = Int(CommandLine.arguments[index + 1]) {
+            let sentence = "The quick brown fox jumps over the lazy dog near the quiet river bank. "
+            let body = String(repeating: sentence, count: 3)
+            return Document(.doc((1...count).map { n in
+                .paragraph([.text("Paragraph \(n). " + body)])
+            }))
+        }
         let json = """
         {
           "type": "doc",
