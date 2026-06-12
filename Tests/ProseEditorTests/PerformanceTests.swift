@@ -145,6 +145,21 @@ final class PerformanceTests: XCTestCase {
 
     // MARK: - Typing (one character per keystroke, layout flushed per keystroke)
 
+    /// Runs the editing path once on a throwaway view before measuring.
+    /// XCTest executes tests alphabetically, so whichever editing benchmark
+    /// runs first otherwise absorbs the process's cold start (CoreText
+    /// caches, first typeset): issue 06 measured testDeleteBackward… at
+    /// ~4× typing solely because it sorts first; interleaved samples put
+    /// the real difference inside the noise floor.
+    private func warmUpEditingPath(_ paragraphs: [String]) {
+        let view = makeProseView(makeDocument(paragraphs))
+        view.layoutIfNeeded()
+        for _ in 0..<10 {
+            view.insertText("x")
+            view.deleteBackward()
+        }
+    }
+
     private func measureTypingProse(
         _ paragraphs: [String],
         atStart: Bool = false,
@@ -152,6 +167,7 @@ final class PerformanceTests: XCTestCase {
         exerciseInteractionPath: Bool = false
     ) {
         let document = makeDocument(paragraphs)
+        warmUpEditingPath(paragraphs)
         measureMetrics([.wallClockTime], automaticallyStartMeasuring: false) {
             MainActor.assumeIsolated {
                 let view = makeProseView(document)
@@ -198,6 +214,37 @@ final class PerformanceTests: XCTestCase {
         }
         view.setNeedsLayout()
         view.layoutIfNeeded()
+    }
+
+    /// Typing with rasterization per keystroke — the live path repaints
+    /// after every edit, which no other typing benchmark exercises (issue
+    /// 04's post-mortem trap). Uses a hostile-size document because draw
+    /// cost is what's being pinned: without draw-rect culling every block
+    /// in the document pays a CTLineDraw per keystroke even though one
+    /// screenful is visible (issue 05).
+    func testTypingWithDrawHostileSizeProse() {
+        let paragraphs = (0..<20).flatMap { _ in TheLastQuestion.paragraphs }
+        let document = makeDocument(paragraphs)
+        warmUpEditingPath(TheLastQuestion.manyPages)
+        // Scale 1: at the default 3x screen scale the 12-megapixel bitmap
+        // costs ~15 ms/key by itself and buries the draw cost being pinned.
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: Self.screenSize, format: format)
+        measureMetrics([.wallClockTime], automaticallyStartMeasuring: false) {
+            MainActor.assumeIsolated {
+                let view = makeProseView(document)
+                view.layoutIfNeeded()
+                startMeasuring()
+                for _ in 0..<Self.keystrokes {
+                    view.insertText("x")
+                    _ = renderer.image { context in
+                        view.layer.render(in: context.cgContext)
+                    }
+                }
+                stopMeasuring()
+            }
+        }
     }
 
     private func measureTypingUITextView(_ paragraphs: [String], atStart: Bool = false) {
@@ -253,6 +300,17 @@ final class PerformanceTests: XCTestCase {
 
     func testDeleteBackwardManyPagesProse() {
         let document = makeDocument(TheLastQuestion.manyPages)
+        warmUpEditingPath(TheLastQuestion.manyPages)
+        // warmUpEditingPath deletes only characters it just typed; a real
+        // delete run also crosses block boundaries (joinBackward typesets
+        // the merged block), so the first measured iterations otherwise
+        // absorb that cold start (rsd 87% with a cooling trend at 905
+        // blocks). Warm the exact measured operation once.
+        let deleteWarmUp = makeProseView(document)
+        deleteWarmUp.layoutIfNeeded()
+        for _ in 0..<Self.keystrokes {
+            deleteWarmUp.deleteBackward()
+        }
         measureMetrics([.wallClockTime], automaticallyStartMeasuring: false) {
             MainActor.assumeIsolated {
                 let view = makeProseView(document)

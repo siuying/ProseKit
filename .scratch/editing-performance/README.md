@@ -52,3 +52,10 @@ Source material:
 - `issues/04-live-keyboard-path-stall.md` — diagnosed and fixed 2026-06-12
   (first char after focus/Return stalled seconds; O(blocks²) document reads
   on the UITextInput surface + full re-typeset from layoutSubviews)
+- `issues/05-draw-rect-culling.md` — implemented 2026-06-12 (draw culls to
+  the dirty rect; edits invalidate block-accurate regions; hostile-size
+  draw benchmark 29 → 8.8 ms/key)
+- `issues/06-deletebackward-variance-gated.md` — closed by measurement
+  2026-06-12: the 4× signal was XCTest alphabetical ordering absorbing
+  process cold start; controlled interleaved ratio ~1.3×; editing
+  benchmarks now warm up explicitly

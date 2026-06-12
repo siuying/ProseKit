@@ -24,7 +24,10 @@ let package = Package(
         ),
         .testTarget(
             name: "ProseEditorTests",
-            dependencies: ["ProseEditor", "ProseModel"]
+            dependencies: ["ProseEditor", "ProseModel"],
+            resources: [
+                .copy("Resources/last_question.txt")
+            ]
         ),
     ]
 )

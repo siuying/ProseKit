@@ -19,6 +19,13 @@ public struct Schema: Sendable {
         }
     }
 
+    /// Validates a single block subtree. Incremental relayout validates only
+    /// the blocks an edit touched; re-validating the whole document would put
+    /// an O(document) walk back on every keystroke.
+    public func validate(block: Node) throws {
+        try validate(block, parent: nil)
+    }
+
     private func validate(_ node: Node, parent: Node?) throws {
         guard nodes.contains(node.type) else {
             throw SchemaError.invalidDocument("unknown node type \(node.type)")

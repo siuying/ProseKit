@@ -64,6 +64,9 @@ import UIKit
         context.scaleBy(x: 1, y: -1)
         context.setFillColor(UIColor.label.cgColor)
         for box in layoutBox.children {
+            // Blocks are y-ordered; everything past the dirty rect is clean.
+            if box.frame.minY > rect.maxY { break }
+            guard box.frame.intersects(rect) else { continue }
             draw(block: box, in: context)
         }
         context.restoreGState()
@@ -73,6 +76,62 @@ import UIKit
         guard bounds.width > 0 else { return }
         layoutStore.width = bounds.width
         layoutBox = try? layoutStore.layout(state.document, changedRange: changedRange)
+    }
+
+    /// Relayouts for the last transaction and invalidates only the region
+    /// the edit can have moved: the changed blocks' frames, extended to the
+    /// document bottom when heights shift everything below. A wrong-too-big
+    /// rect costs a repaint; a wrong-too-small rect leaves stale pixels, so
+    /// every uncertain case falls back to the full bounds.
+    private func relayoutAndDisplayEdit() {
+        let previous = layoutBox
+        relayout(changedRange: state.lastTransaction?.changedRange)
+        setNeedsDisplay(Self.editDirtyRect(
+            from: previous,
+            to: layoutBox,
+            changedRange: state.lastTransaction?.changedRange,
+            fallback: bounds
+        ))
+    }
+
+    static func editDirtyRect(
+        from previous: LayoutBox?,
+        to current: LayoutBox?,
+        changedRange: Range<Position>?,
+        fallback: CGRect
+    ) -> CGRect {
+        guard let previous, let current, let changedRange else { return fallback }
+        // A collapsed range still names the edited spot (e.g. a no-op
+        // command); widen it so the containing block is found.
+        let range = changedRange.isEmpty
+            ? changedRange.lowerBound..<(changedRange.lowerBound + 1)
+            : changedRange
+        var dirty: CGRect = .null
+        for box in current.children {
+            if box.positionRange.lowerBound >= range.upperBound { break }
+            guard rangesIntersect(box.positionRange, range) else { continue }
+            dirty = dirty.union(box.frame)
+        }
+        guard !dirty.isNull else { return fallback }
+
+        // When total height or block count changes, every block below the
+        // edit moved; both the old and new extent must repaint.
+        if previous.frame.height != current.frame.height
+            || previous.children.count != current.children.count {
+            let bottom = max(previous.frame.maxY, current.frame.maxY)
+            dirty = CGRect(
+                x: 0, y: dirty.minY,
+                width: max(fallback.width, dirty.width),
+                height: bottom - dirty.minY
+            )
+        }
+        // Full-width strip (fragment frames can be narrower than the view),
+        // outset for glyph overhang at the strip edges.
+        return CGRect(
+            x: 0, y: dirty.minY,
+            width: max(fallback.width, dirty.width),
+            height: dirty.height
+        ).insetBy(dx: 0, dy: -2)
     }
 
     private func draw(block: LayoutBox, in context: CGContext) {
@@ -137,21 +196,18 @@ import UIKit
     private func insertPlainText(_ text: String) {
         inputDelegate?.textWillChange(self)
         try? state.insertText(text)
-        relayout(changedRange: state.lastTransaction?.changedRange)
-        setNeedsDisplay()
+        relayoutAndDisplayEdit()
         inputDelegate?.textDidChange(self)
     }
 
     public func deleteBackward() {
         if (try? Commands.joinBackward().run(in: &state)) == true {
-            relayout(changedRange: state.lastTransaction?.changedRange)
-            setNeedsDisplay()
+            relayoutAndDisplayEdit()
             return
         }
         inputDelegate?.textWillChange(self)
         try? state.deleteBackward()
-        relayout(changedRange: state.lastTransaction?.changedRange)
-        setNeedsDisplay()
+        relayoutAndDisplayEdit()
         inputDelegate?.textDidChange(self)
     }
 
@@ -239,8 +295,7 @@ import UIKit
             selection: TextSelection(anchor: from + text.count, head: from + text.count),
             origin: .local
         ))
-        relayout(changedRange: state.lastTransaction?.changedRange)
-        setNeedsDisplay()
+        relayoutAndDisplayEdit()
         inputDelegate?.textDidChange(self)
     }
 
@@ -572,8 +627,9 @@ import UIKit
     private func runCommand(_ command: Command) {
         inputDelegate?.textWillChange(self)
         _ = try? command.run(in: &state)
-        relayout(changedRange: state.lastTransaction?.changedRange)
-        setNeedsDisplay()
+        // A command that didn't dispatch leaves a stale lastTransaction;
+        // its dirty rect repaints an already-clean region, never too little.
+        relayoutAndDisplayEdit()
         inputDelegate?.textDidChange(self)
     }
 
