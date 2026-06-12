@@ -717,6 +717,14 @@ import UIKit
         runCommand(Commands.toggleMark(.code))
     }
 
+    public func toggleBold() {
+        runCommand(Commands.toggleMark(.bold))
+    }
+
+    public func toggleItalic() {
+        runCommand(Commands.toggleMark(.italic))
+    }
+
     public override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
         switch action {
         case #selector(copy(_:)), #selector(cut(_:)):
@@ -836,11 +844,11 @@ import UIKit
     }
 
     @objc private func toggleBoldFromKeyCommand() {
-        runCommand(Commands.toggleMark(.bold))
+        toggleBold()
     }
 
     @objc private func toggleItalicFromKeyCommand() {
-        runCommand(Commands.toggleMark(.italic))
+        toggleItalic()
     }
 
 }
