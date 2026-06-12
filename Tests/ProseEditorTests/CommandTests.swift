@@ -73,6 +73,18 @@ final class CommandTests: XCTestCase {
         XCTAssertEqual(state.document.root.content[0].content[0].marks, [])
     }
 
+    func testSetTextAlignSetsAndClearsBlockAttr() throws {
+        var state = EditorState(document: Document(.doc([
+            .paragraph([.text("hello")]),
+        ])), selection: TextSelection(anchor: 3, head: 3))
+
+        XCTAssertTrue(try Commands.setTextAlign("center").run(in: &state))
+        XCTAssertEqual(state.document.root.content[0].attrs["textAlign"], .string("center"))
+
+        XCTAssertTrue(try Commands.setTextAlign(nil).run(in: &state))
+        XCTAssertNil(state.document.root.content[0].attrs["textAlign"], "left/nil clears the redundant attr")
+    }
+
     func testSetLinkWrapsSelectionInLinkMark() throws {
         var state = EditorState(document: Document(.doc([
             .paragraph([.text("hello")]),

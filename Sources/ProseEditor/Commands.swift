@@ -44,6 +44,19 @@ public enum Commands {
         }
     }
 
+    /// Sets the block's `textAlign` (the headless side of the alignment buttons,
+    /// slice 13). `nil`/`"left"` clears it.
+    public static func setTextAlign(_ value: String?) -> Command {
+        Command { state in
+            let (document, selection, changedRange) = try state.document.settingTextAlign(
+                at: state.selection.head,
+                to: value
+            )
+            state.replaceDocument(document, selection: selection, changedRange: changedRange)
+            return true
+        }
+    }
+
     /// Wraps the (non-empty) selection in a link Mark. Used by the link popover
     /// (slice 08) and by pasting a URL onto a selection.
     public static func setLink(href: String) -> Command {

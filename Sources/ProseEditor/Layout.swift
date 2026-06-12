@@ -207,6 +207,17 @@ func rangesIntersect(_ lhs: Range<Position>, _ rhs: Range<Position>) -> Bool {
     lhs.lowerBound < rhs.upperBound && rhs.lowerBound < lhs.upperBound
 }
 
+/// The x-origin of a line under a block's `textAlign` (Q9.2). Left, justify,
+/// an absent value, and any value we don't recognise all flush left, so an
+/// unknown alignment degrades in rendering, never in data (ADR 0005).
+private func alignedOriginX(_ alignment: String?, lineWidth: CGFloat, width: CGFloat) -> CGFloat {
+    switch alignment {
+    case "right": return max(0, width - lineWidth)
+    case "center": return max(0, (width - lineWidth) / 2)
+    default: return 0
+    }
+}
+
 private func typesetLeafBlock(
     _ block: Node,
     width: CGFloat,
@@ -252,6 +263,7 @@ private func typesetLineFragments(
     }
 
     let typesetter = CTTypesetterCreateWithAttributedString(attributed)
+    let alignment = block.attrs["textAlign"]?.stringValue
     let utf16Count = text.utf16.count
     var fragments: [LineFragment] = []
     var lineY = y
@@ -262,21 +274,29 @@ private func typesetLineFragments(
     while utf16Start < utf16Count {
         let suggested = CTTypesetterSuggestLineBreak(typesetter, utf16Start, Double(max(width, 1)))
         let length = max(1, suggested)
-        let line = CTTypesetterCreateLine(typesetter, CFRange(location: utf16Start, length: length))
+        var line = CTTypesetterCreateLine(typesetter, CFRange(location: utf16Start, length: length))
 
         var ascent: CGFloat = 0
         var descent: CGFloat = 0
         var leading: CGFloat = 0
-        let lineWidth = CGFloat(CTLineGetTypographicBounds(line, &ascent, &descent, &leading))
+        var lineWidth = CGFloat(CTLineGetTypographicBounds(line, &ascent, &descent, &leading))
         let height = ceil(ascent + descent + leading)
 
         let utf16End = utf16Start + length
+        // Justified text stretches every line but the last to the full width;
+        // CTLine doesn't justify on its own (a known CoreText gotcha).
+        if alignment == "justify", utf16End < utf16Count,
+           let justified = CTLineCreateJustifiedLine(line, 1, Double(width)) {
+            line = justified
+            lineWidth = width
+        }
+        let originX = alignedOriginX(alignment, lineWidth: lineWidth, width: width)
         let endIndex = characterIndex(forUTF16Offset: utf16End, in: text)
         let characterCount = text.distance(from: startIndex, to: endIndex)
 
         fragments.append(LineFragment(
             text: String(text[startIndex..<endIndex]),
-            frame: CGRect(x: 0, y: lineY, width: lineWidth, height: height),
+            frame: CGRect(x: originX, y: lineY, width: lineWidth, height: height),
             typographicHeight: height,
             positionRange: (textStart + characterStart)..<(textStart + characterStart + characterCount),
             typesetLine: TypesetLine(line: line, ascent: ascent, utf16Range: utf16Start..<utf16End)

@@ -87,6 +87,22 @@ final class RenderingTests: XCTestCase {
         XCTAssertEqual(render(link), render(linkPlusUnderline), "an extra underline mark on a link is invisible (Q9.6)")
     }
 
+    func testTextAlignShiftsLineOrigins() {
+        func doc(_ align: String?) -> Document {
+            var attrs: [String: JSONValue] = [:]
+            if let align { attrs["textAlign"] = .string(align) }
+            return Document(.doc([Node(
+                type: "paragraph",
+                attrs: attrs,
+                content: [.text("Hello world, this is a longer line of text that wraps onto several lines so justify has something to stretch")]
+            )]))
+        }
+        let left = render(makeView(doc(nil)))
+        XCTAssertNotEqual(left, render(makeView(doc("center"))), "center shifts line origins")
+        XCTAssertNotEqual(left, render(makeView(doc("right"))), "right flushes lines to the trailing edge")
+        XCTAssertNotEqual(left, render(makeView(doc("justify"))), "justify stretches all but the last line")
+    }
+
     func testHeadingRenderingIsLevelAware() {
         func headingHeight(_ level: Int) -> CGFloat {
             makeView(Document(.doc([.heading(level: level, [.text("Title")])]))).contentSize.height
