@@ -252,6 +252,63 @@ final class ScrollingTests: XCTestCase {
         XCTAssertEqual(view.contentInset.bottom, 0, "host opted out; insets are its job")
     }
 
+    /// The system's UITextInteraction does not autoscroll a selection-handle
+    /// drag held at the Viewport edge (verified on device 2026-06-12, see
+    /// .scratch/scrolling/issues/01), so ProseView drives it: while the drag
+    /// sits in the edge band, the Viewport scrolls and the Selection head
+    /// extends to what passes under the finger.
+    func testSelectionDragHeldInTheBottomEdgeBandAutoscrolls() {
+        let view = makeView(tallFixture)
+        view.selectedTextRange = ProseTextRange(anchor: 10, head: 30)
+
+        // Handle drag at 10pt above the Viewport bottom.
+        view.updateSelectionDragAutoscroll(forDragAt: CGPoint(x: 200, y: 390))
+        for _ in 0..<10 { view.selectionDragAutoscrollTick() }
+
+        XCTAssertGreaterThan(view.contentOffset.y, 0, "holding a drag in the edge band must scroll")
+        let selection = (view.selectedTextRange as! ProseTextRange)
+        XCTAssertEqual(selection.anchor, 10, "the anchored end of the selection must not move")
+        XCTAssertGreaterThan(selection.head, 30, "the head must extend to the text scrolled under the finger")
+    }
+
+    func testSelectionDragInTheMiddleOfTheViewportDoesNotAutoscroll() {
+        let view = makeView(tallFixture)
+        view.selectedTextRange = ProseTextRange(anchor: 10, head: 30)
+
+        view.updateSelectionDragAutoscroll(forDragAt: CGPoint(x: 200, y: 200))
+        for _ in 0..<10 { view.selectionDragAutoscrollTick() }
+
+        XCTAssertEqual(view.contentOffset.y, 0)
+        XCTAssertEqual((view.selectedTextRange as! ProseTextRange).head, 30)
+    }
+
+    /// Autoscroll rides on the system's range-adjustment recognizer via
+    /// addTarget — the only public seam. If the OS stops exposing it, edge
+    /// autoscroll dies silently; this makes it loud.
+    func testSystemSelectionDragGestureIsHooked() {
+        let view = makeView(tallFixture)
+        let window = UIWindow(frame: CGRect(origin: .zero, size: Self.size))
+        window.addSubview(view)
+        window.isHidden = false
+        XCTAssertTrue(
+            view.hasSelectionDragHook,
+            "no range-adjustment gesture found on this OS; selection-drag edge autoscroll has no driver"
+        )
+    }
+
+    func testSelectionDragAutoscrollStopsAtTheContentBottom() {
+        let view = makeView(tallFixture)
+        view.selectedTextRange = ProseTextRange(anchor: 10, head: 30)
+        let maxOffset = view.contentSize.height - view.bounds.height
+        view.contentOffset = CGPoint(x: 0, y: maxOffset - 1)
+        view.layoutIfNeeded()
+
+        view.updateSelectionDragAutoscroll(forDragAt: CGPoint(x: 200, y: maxOffset - 1 + 390))
+        for _ in 0..<50 { view.selectionDragAutoscrollTick() }
+
+        XCTAssertEqual(view.contentOffset.y, maxOffset, accuracy: 0.5, "autoscroll must clamp to the content edge")
+    }
+
     func testLongDocumentIsScrollableToTheLayoutHeight() throws {
         let document = tallFixture
         let view = makeView(document)
