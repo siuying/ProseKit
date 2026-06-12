@@ -169,7 +169,7 @@ public struct IncrementalLayoutStore: Sendable {
     }
 }
 
-private func rangesIntersect(_ lhs: Range<Position>, _ rhs: Range<Position>) -> Bool {
+func rangesIntersect(_ lhs: Range<Position>, _ rhs: Range<Position>) -> Bool {
     lhs.lowerBound < rhs.upperBound && rhs.lowerBound < lhs.upperBound
 }
 
