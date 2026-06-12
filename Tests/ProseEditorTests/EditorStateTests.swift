@@ -3,6 +3,48 @@ import XCTest
 @testable import ProseModel
 
 final class EditorStateTests: XCTestCase {
+    func testIsActiveReflectsSelectionMarks() throws {
+        let document = Document(.doc([.paragraph([.text("hello", marks: [.bold]), .text(" world")])]))
+        // Whole selection over the bold run.
+        var state = EditorState(document: document, selection: TextSelection(anchor: 2, head: 7))
+        XCTAssertTrue(state.isActive(.bold))
+        XCTAssertFalse(state.isActive(.italic))
+
+        // Selection spanning bold + plain is not fully bold.
+        state = EditorState(document: document, selection: TextSelection(anchor: 2, head: 13))
+        XCTAssertFalse(state.isActive(.bold))
+    }
+
+    func testIsActiveAtCollapsedCaretUsesLeftCharThenTypingMark() throws {
+        // A caret inside a bold run inherits bold from the character to its left.
+        let bold = Document(.doc([.paragraph([.text("hello", marks: [.bold])])]))
+        let inBold = EditorState(document: bold, selection: TextSelection(anchor: 4, head: 4))
+        XCTAssertTrue(inBold.isActive(.bold))
+
+        // In plain text, a pending typing mark drives the active state.
+        var inPlain = EditorState(
+            document: Document(.doc([.paragraph([.text("hello")])])),
+            selection: TextSelection(anchor: 4, head: 4)
+        )
+        XCTAssertFalse(inPlain.isActive(.bold))
+        inPlain.toggleTypingMark(.bold)
+        XCTAssertTrue(inPlain.isActive(.bold), "a pending typing mark is active")
+    }
+
+    func testActiveBlockTypeAndHeadingLevel() {
+        let document = Document(.doc([
+            .paragraph([.text("p")]),
+            .heading(level: 3, [.text("h")]),
+        ]))
+        let inParagraph = EditorState(document: document, selection: TextSelection(anchor: 2, head: 2))
+        XCTAssertEqual(inParagraph.activeBlockType, "paragraph")
+        XCTAssertNil(inParagraph.activeHeadingLevel)
+
+        let inHeading = EditorState(document: document, selection: TextSelection(anchor: 6, head: 6))
+        XCTAssertEqual(inHeading.activeBlockType, "heading")
+        XCTAssertEqual(inHeading.activeHeadingLevel, 3)
+    }
+
     func testInsertAndDeleteDispatchLocalTransactions() throws {
         var state = EditorState(document: Document(.doc([
             .paragraph([.text("hi")]),

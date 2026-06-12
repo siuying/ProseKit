@@ -251,6 +251,7 @@ import UIKit
             fallback: bounds
         ))
         scrollCaretToVisible()
+        onStateChange?()
     }
 
     /// Reveals the Selection's head after local edits and keyboard caret
@@ -336,11 +337,90 @@ import UIKit
         for fragment in block.lineFragments {
             guard let typeset = fragment.typesetLine else { continue }
             let baseline = block.frame.minY + fragment.frame.minY + typeset.ascent
-            context.textPosition = CGPoint(
+            let origin = CGPoint(
                 x: block.frame.minX + fragment.frame.minX,
                 y: flipHeight - baseline
             )
+            drawHighlights(for: typeset.line, lineOrigin: origin, in: context)
+            context.textPosition = origin
             CTLineDraw(typeset.line, context)
+            drawLinkTint(for: typeset.line, lineOrigin: origin, in: context)
+            drawStrikethrough(for: typeset.line, lineOrigin: origin, in: context)
+        }
+    }
+
+    /// Recolours link runs in the link tint after the line is drawn in the body
+    /// colour. Links don't carry an explicit CoreText foreground (that would leak
+    /// into the shared context fill that foreground-from-context runs read); the
+    /// tint is overpainted here, like highlight and strikethrough.
+    private func drawLinkTint(for line: CTLine, lineOrigin: CGPoint, in context: CGContext) {
+        let runs = CTLineGetGlyphRuns(line) as? [CTRun] ?? []
+        for run in runs {
+            let attributes = CTRunGetAttributes(run) as NSDictionary
+            guard attributes[BlockStyle.linkAttributeName] != nil else { continue }
+            context.saveGState()
+            context.setFillColor(BlockStyle.linkColor)
+            context.textPosition = lineOrigin
+            CTRunDraw(run, context, CFRange(location: 0, length: 0))
+            context.restoreGState()
+        }
+    }
+
+    /// Fills the background behind each run carrying a highlight colour, drawn
+    /// before the glyphs. The raw `color` value is parsed here (not at layout
+    /// time) so dark-mode palette colours resolve against the current traits;
+    /// an unparseable value draws nothing, the Mark surviving regardless.
+    private func drawHighlights(for line: CTLine, lineOrigin: CGPoint, in context: CGContext) {
+        let runs = CTLineGetGlyphRuns(line) as? [CTRun] ?? []
+        for run in runs {
+            let attributes = CTRunGetAttributes(run) as NSDictionary
+            guard let value = attributes[BlockStyle.highlightAttributeName] as? String,
+                  let color = HighlightColor.color(for: value) else { continue }
+            let stringRange = CTRunGetStringRange(run)
+            let startX = CTLineGetOffsetForStringIndex(line, stringRange.location, nil)
+            let endX = CTLineGetOffsetForStringIndex(line, stringRange.location + stringRange.length, nil)
+            var ascent: CGFloat = 0
+            var descent: CGFloat = 0
+            _ = CTRunGetTypographicBounds(run, CFRange(location: 0, length: 0), &ascent, &descent, nil)
+            let rect = CGRect(
+                x: lineOrigin.x + startX,
+                y: lineOrigin.y - descent,
+                width: endX - startX,
+                height: ascent + descent
+            )
+            context.saveGState()
+            context.setFillColor(color.cgColor)
+            context.fill(rect)
+            context.restoreGState()
+        }
+    }
+
+    /// CoreText draws underline but not strikethrough, so each run flagged by
+    /// `BlockStyle.strikethroughAttributeName` gets a manual stroke through the
+    /// x-height. Run geometry comes from the same CTLine the glyphs drew, so the
+    /// stroke stays exactly aligned with what was typeset.
+    private func drawStrikethrough(for line: CTLine, lineOrigin: CGPoint, in context: CGContext) {
+        let runs = CTLineGetGlyphRuns(line) as? [CTRun] ?? []
+        for run in runs {
+            let attributes = CTRunGetAttributes(run) as NSDictionary
+            guard attributes[BlockStyle.strikethroughAttributeName] != nil,
+                  let font = attributes[kCTFontAttributeName as String].map({ $0 as! CTFont }) else {
+                continue
+            }
+            let stringRange = CTRunGetStringRange(run)
+            let startX = CTLineGetOffsetForStringIndex(line, stringRange.location, nil)
+            let endX = CTLineGetOffsetForStringIndex(line, stringRange.location + stringRange.length, nil)
+            // A line through the middle of lowercase glyphs.
+            let y = lineOrigin.y + CTFontGetXHeight(font) / 2
+            let thickness = max(1, (CTFontGetSize(font) / 17).rounded())
+            context.saveGState()
+            // Match the glyph colour set in drawCanvas (foreground-from-context).
+            context.setStrokeColor(UIColor.label.cgColor)
+            context.setLineWidth(thickness)
+            context.move(to: CGPoint(x: lineOrigin.x + startX, y: y))
+            context.addLine(to: CGPoint(x: lineOrigin.x + endX, y: y))
+            context.strokePath()
+            context.restoreGState()
         }
     }
 
@@ -427,6 +507,7 @@ import UIKit
             )
             canvas.setNeedsDisplay()
             inputDelegate?.selectionDidChange(self)
+            onStateChange?()
         }
     }
 
@@ -731,6 +812,41 @@ import UIKit
         runCommand(Commands.toggleMark(.italic))
     }
 
+    public func toggleStrike() { runCommand(Commands.toggleMark(Mark(type: "strike"))) }
+    public func toggleUnderline() { runCommand(Commands.toggleMark(Mark(type: "underline"))) }
+    public func toggleSuperscript() { runCommand(Commands.toggleMark(Mark(type: "superscript"))) }
+    public func toggleSubscript() { runCommand(Commands.toggleMark(Mark(type: "subscript"))) }
+
+    public func toggleHighlight(_ hex: String) {
+        runCommand(Commands.toggleMark(Mark(type: "highlight", attrs: ["color": .string(hex)])))
+    }
+
+    public func setLink(_ href: String) { runCommand(Commands.setLink(href: href)) }
+    public func setTextAlign(_ value: String?) { runCommand(Commands.setTextAlign(value)) }
+    public func setBlockType(headingLevel level: Int?) { runCommand(Commands.setBlockType(headingLevel: level)) }
+
+    // MARK: - Active state (toolbar binding)
+
+    public func isActive(_ mark: Mark) -> Bool { state.isActive(mark) }
+    public var activeBlockType: String { state.activeBlockType }
+    public var activeHeadingLevel: Int? { state.activeHeadingLevel }
+
+    /// Called after any edit or selection change so a host toolbar can refresh
+    /// its active-state highlighting.
+    public var onStateChange: (() -> Void)?
+
+    private var customInputAccessoryView: UIView?
+
+    /// A host-supplied accessory view (e.g. a formatting toolbar) shown above
+    /// the keyboard. UIKit positions and animates it; the editor's keyboard
+    /// avoidance already accounts for its height.
+    public override var inputAccessoryView: UIView? { customInputAccessoryView }
+
+    public func setInputAccessoryView(_ view: UIView?) {
+        customInputAccessoryView = view
+        if isFirstResponder { reloadInputViews() }
+    }
+
     public override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
         switch action {
         case #selector(copy(_:)), #selector(cut(_:)):
@@ -757,7 +873,12 @@ import UIKit
 
     public override func paste(_ sender: Any?) {
         guard let text = pasteboard.string else { return }
-        // insertText replaces the current selection and splits blocks at newlines.
+        // Pasting a URL onto a selection links the selection (Q6) instead of
+        // replacing it; anything else replaces, splitting blocks at newlines.
+        if !state.selection.isCollapsed, let href = LinkDetection.soleURL(in: text) {
+            runCommand(Commands.setLink(href: href))
+            return
+        }
         insertText(text)
     }
 

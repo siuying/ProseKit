@@ -76,11 +76,44 @@ public struct EditorState: Sendable {
         )
     }
 
+    // MARK: - Active state (toolbar queries)
+
+    /// Whether `mark` is active at the Selection: the whole range carries it,
+    /// or — at a collapsed caret — it is a pending typing Mark, else the Mark
+    /// the character to the left carries (what the next typed text inherits).
+    public func isActive(_ mark: Mark) -> Bool {
+        let lower = min(selection.anchor, selection.head)
+        let upper = max(selection.anchor, selection.head)
+        if lower < upper {
+            return document.rangeHasMark(from: lower, to: upper, mark: mark)
+        }
+        if !typingMarks.isEmpty {
+            return typingMarks.contains(mark)
+        }
+        guard lower > 0, let info = document.blockInfo(containing: lower), lower > info.start + 1 else {
+            return false
+        }
+        return document.rangeHasMark(from: lower - 1, to: lower, mark: mark)
+    }
+
+    /// The type of the Block Node containing the Selection head (e.g.
+    /// `paragraph`, `heading`).
+    public var activeBlockType: String {
+        document.blockInfo(containing: selection.head)?.node.type ?? "paragraph"
+    }
+
+    /// The heading level at the Selection head, or nil when it is not a heading.
+    public var activeHeadingLevel: Int? {
+        let node = document.blockInfo(containing: selection.head)?.node
+        guard node?.type == "heading" else { return nil }
+        return node?.attrs["level"]?.intValue
+    }
+
     public mutating func toggleTypingMark(_ mark: Mark) {
         if typingMarks.contains(mark) {
             typingMarks.removeAll { $0 == mark }
         } else {
-            typingMarks.append(mark)
+            typingMarks = MarkRules.adding(mark, to: typingMarks)
         }
     }
 }

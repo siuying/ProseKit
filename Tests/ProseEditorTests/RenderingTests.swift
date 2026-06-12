@@ -42,6 +42,76 @@ final class RenderingTests: XCTestCase {
         Document(.doc(TheLastQuestion.paragraphs.prefix(12).map { .paragraph([.text($0)]) }))
     }
 
+    func testStrikeAndUnderlineDrawDecorations() {
+        let plain = makeView(Document(.doc([.paragraph([.text("Hello world")])])))
+        let struck = makeView(Document(.doc([.paragraph([.text("Hello world", marks: [Mark(type: "strike")])])])))
+        let underlined = makeView(Document(.doc([.paragraph([.text("Hello world", marks: [Mark(type: "underline")])])])))
+
+        XCTAssertNotEqual(render(plain), render(struck), "strikethrough must be drawn over the run")
+        XCTAssertNotEqual(render(plain), render(underlined), "underline must be drawn under the run")
+    }
+
+    func testHighlightFillsBackgroundParseOrPlain() {
+        func doc(_ marks: [Mark]) -> Document { Document(.doc([.paragraph([.text("Hello world", marks: marks)])])) }
+        let plain = makeView(doc([]))
+        let yellow = makeView(doc([Mark(type: "highlight", attrs: ["color": .string("#ffd54f")])]))
+        let blue = makeView(doc([Mark(type: "highlight", attrs: ["color": .string("#80d8ff")])]))
+        let unparseable = makeView(doc([Mark(type: "highlight", attrs: ["color": .string("var(--x)")])]))
+
+        XCTAssertNotEqual(render(plain), render(yellow), "a parseable highlight fills a background")
+        XCTAssertNotEqual(render(yellow), render(blue), "multicolor: different colours render differently")
+        XCTAssertEqual(render(plain), render(unparseable), "an unparseable colour draws no background")
+    }
+
+    func testSuperscriptAndSubscriptRenderDistinctly() {
+        func doc(_ marks: [Mark]) -> Document { Document(.doc([.paragraph([.text("x2", marks: marks)])])) }
+        let plain = makeView(doc([]))
+        let sup = makeView(doc([Mark(type: "superscript")]))
+        let sub = makeView(doc([Mark(type: "subscript")]))
+
+        XCTAssertNotEqual(render(plain), render(sup), "superscript must raise/shrink the run")
+        XCTAssertNotEqual(render(plain), render(sub), "subscript must lower/shrink the run")
+        XCTAssertNotEqual(render(sup), render(sub), "super and subscript render differently")
+    }
+
+    func testLinkRendersTintAndUnderlineAndAbsorbsUnderlineMark() {
+        func doc(_ marks: [Mark]) -> Document { Document(.doc([.paragraph([.text("Hello world", marks: marks)])])) }
+        let plain = makeView(doc([]))
+        let link = makeView(doc([Mark(type: "link", attrs: ["href": .string("https://example.com")])]))
+        let linkPlusUnderline = makeView(doc([
+            Mark(type: "link", attrs: ["href": .string("https://example.com")]),
+            Mark(type: "underline"),
+        ]))
+
+        XCTAssertNotEqual(render(plain), render(link), "a link must render in tint + underline")
+        XCTAssertEqual(render(link), render(linkPlusUnderline), "an extra underline mark on a link is invisible (Q9.6)")
+    }
+
+    func testTextAlignShiftsLineOrigins() {
+        func doc(_ align: String?) -> Document {
+            var attrs: [String: JSONValue] = [:]
+            if let align { attrs["textAlign"] = .string(align) }
+            return Document(.doc([Node(
+                type: "paragraph",
+                attrs: attrs,
+                content: [.text("Hello world, this is a longer line of text that wraps onto several lines so justify has something to stretch")]
+            )]))
+        }
+        let left = render(makeView(doc(nil)))
+        XCTAssertNotEqual(left, render(makeView(doc("center"))), "center shifts line origins")
+        XCTAssertNotEqual(left, render(makeView(doc("right"))), "right flushes lines to the trailing edge")
+        XCTAssertNotEqual(left, render(makeView(doc("justify"))), "justify stretches all but the last line")
+    }
+
+    func testHeadingRenderingIsLevelAware() {
+        func headingHeight(_ level: Int) -> CGFloat {
+            makeView(Document(.doc([.heading(level: level, [.text("Title")])]))).contentSize.height
+        }
+        XCTAssertGreaterThan(headingHeight(1), headingHeight(2), "h1 is larger than h2")
+        XCTAssertGreaterThan(headingHeight(2), headingHeight(3), "h2 is larger than h3")
+        XCTAssertGreaterThan(headingHeight(3), headingHeight(4), "h3 is larger than h4")
+    }
+
     func testTypingMidBlockRendersLikeFreshView() {
         let view = makeView(fixture)
         // Middle of the second on-screen block.

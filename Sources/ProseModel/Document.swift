@@ -274,6 +274,49 @@ public struct Document: Codable, Hashable, Sendable {
         )
     }
 
+    /// Sets the block at `position` to a specific type — a heading of `level`,
+    /// or a paragraph when `level` is nil — without toggling. Unlike
+    /// `togglingHeading`, choosing a different heading level changes the level
+    /// rather than reverting to a paragraph (what a heading dropdown needs).
+    public func settingBlockType(at position: Position, headingLevel level: Int?) throws -> (Document, TextSelection, Range<Position>) {
+        guard let info = blockInfo(containing: position) else {
+            throw StepError.unsupportedReplacement("setBlockType requires a text block")
+        }
+        let updated = level.map(info.node.asHeading(level:)) ?? info.node.asParagraph()
+        return (
+            replacingBlocks(in: info.index..<(info.index + 1), with: [updated]),
+            TextSelection(anchor: position, head: position),
+            info.start..<(info.start + updated.nodeSize)
+        )
+    }
+
+    /// Sets (or clears) the `textAlign` Attr on the block at `position`.
+    /// Only paragraph and heading carry it (Q9.2); `nil` or `"left"` clears it,
+    /// keeping the absent-means-left default rather than storing a redundant Attr.
+    public func settingTextAlign(at position: Position, to value: String?) throws -> (Document, TextSelection, Range<Position>) {
+        guard let info = blockInfo(containing: position),
+              info.node.type == "paragraph" || info.node.type == "heading" else {
+            throw StepError.unsupportedReplacement("textAlign applies to paragraph and heading")
+        }
+        var updated = info.node
+        if let value, value != "left" {
+            updated.attrs["textAlign"] = .string(value)
+        } else {
+            updated.attrs["textAlign"] = nil
+        }
+        return (
+            replacingBlocks(in: info.index..<(info.index + 1), with: [updated]),
+            TextSelection(anchor: position, head: position),
+            info.start..<(info.start + updated.nodeSize)
+        )
+    }
+
+    /// The Position of the first text character in the block containing
+    /// `position` (one past the block's opening boundary).
+    public func blockTextStart(at position: Position) -> Position? {
+        blockInfo(containing: position).map { $0.start + 1 }
+    }
+
     public func text(from: Position, to: Position) throws -> String {
         guard from <= to else {
             throw StepError.unsupportedReplacement("replacement range must be ordered")
@@ -435,7 +478,7 @@ private extension Node {
 
         func marks(_ existing: [Mark]) -> [Mark] {
             if enabled {
-                return existing.contains(mark) ? existing : existing + [mark]
+                return MarkRules.adding(mark, to: existing)
             }
             return existing.filter { $0 != mark }
         }

@@ -73,6 +73,60 @@ final class CommandTests: XCTestCase {
         XCTAssertEqual(state.document.root.content[0].content[0].marks, [])
     }
 
+    func testSetBlockTypeChangesHeadingLevelWithoutToggling() throws {
+        var state = EditorState(document: Document(.doc([
+            .heading(level: 1, [.text("hi")]),
+        ])), selection: TextSelection(anchor: 4, head: 4))
+
+        XCTAssertTrue(try Commands.setBlockType(headingLevel: 3).run(in: &state))
+        XCTAssertEqual(state.document.root.content[0].type, "heading")
+        XCTAssertEqual(state.document.root.content[0].attrs["level"], .int(3),
+                       "a different level changes the level rather than reverting to paragraph")
+
+        XCTAssertTrue(try Commands.setBlockType(headingLevel: nil).run(in: &state))
+        XCTAssertEqual(state.document.root.content[0].type, "paragraph")
+    }
+
+    func testSetTextAlignSetsAndClearsBlockAttr() throws {
+        var state = EditorState(document: Document(.doc([
+            .paragraph([.text("hello")]),
+        ])), selection: TextSelection(anchor: 3, head: 3))
+
+        XCTAssertTrue(try Commands.setTextAlign("center").run(in: &state))
+        XCTAssertEqual(state.document.root.content[0].attrs["textAlign"], .string("center"))
+
+        XCTAssertTrue(try Commands.setTextAlign(nil).run(in: &state))
+        XCTAssertNil(state.document.root.content[0].attrs["textAlign"], "left/nil clears the redundant attr")
+    }
+
+    func testSetLinkWrapsSelectionInLinkMark() throws {
+        var state = EditorState(document: Document(.doc([
+            .paragraph([.text("hello")]),
+        ])), selection: TextSelection(anchor: 2, head: 7))
+
+        XCTAssertTrue(try Commands.setLink(href: "https://example.com").run(in: &state))
+
+        let mark = state.document.root.content[0].content[0].marks.first
+        XCTAssertEqual(mark?.type, "link")
+        XCTAssertEqual(mark?.attrs["href"], .string("https://example.com"))
+    }
+
+    func testSetLinkDoesNothingOnCollapsedSelection() throws {
+        var state = EditorState(document: Document(.doc([
+            .paragraph([.text("hello")]),
+        ])), selection: TextSelection(anchor: 3, head: 3))
+
+        XCTAssertFalse(try Commands.setLink(href: "https://example.com").run(in: &state))
+    }
+
+    func testLinkDetectionRecognisesSoleURL() {
+        XCTAssertEqual(LinkDetection.soleURL(in: "https://example.com"), "https://example.com")
+        XCTAssertEqual(LinkDetection.soleURL(in: "  https://example.com/a?b=c  "), "https://example.com/a?b=c")
+        XCTAssertNil(LinkDetection.soleURL(in: "see https://example.com here"))
+        XCTAssertNil(LinkDetection.soleURL(in: "just words"))
+        XCTAssertNil(LinkDetection.soleURL(in: ""))
+    }
+
     func testCollapsedToggleMarkAppliesToNextInsertedText() throws {
         var state = EditorState(document: Document(.doc([
             .paragraph([.text("hi")]),

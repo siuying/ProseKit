@@ -157,6 +157,22 @@ final class ProseViewTests: XCTestCase {
         XCTAssertTrue(selection.isEmpty)
     }
 
+    func testPastingURLOntoSelectionLinksItInsteadOfReplacing() throws {
+        let view = makeView(Document(.doc([.paragraph([.text("hello world")])])))
+        let pasteboard = UIPasteboard.withUniqueName()
+        view.pasteboard = pasteboard
+        pasteboard.string = "https://example.com"
+
+        // Select "hello" (positions 2..<7) and paste a URL.
+        view.selectedTextRange = ProseTextRange(anchor: 2, head: 7)
+        view.paste(nil)
+
+        XCTAssertEqual(view.document.plainText, "hello world", "the selected text is kept, not replaced")
+        let mark = view.document.root.content[0].content.first?.marks.first
+        XCTAssertEqual(mark?.type, "link")
+        XCTAssertEqual(mark?.attrs["href"], .string("https://example.com"))
+    }
+
     func testPastingMultiLineTextSplitsBlocks() throws {
         let view = makeView(Document(.doc([.paragraph([.text("ad")])])))
         let pasteboard = UIPasteboard.withUniqueName()
