@@ -21,6 +21,24 @@ final class ProseExampleUITests: XCTestCase {
         return app.scrollViews.firstMatch
     }
 
+    /// Without -paragraphs the app boots into the demo list; tapping a row
+    /// must push a working full-screen editor.
+    @MainActor
+    func testDemoListPushesAFullScreenEditor() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        let row = app.staticTexts["Rich Text Basics"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        row.tap()
+
+        let editor = editorElement(in: app)
+        XCTAssertTrue(editor.waitForExistence(timeout: 10))
+        editor.tap()
+        sleep(2)
+        app.typeText("a")
+    }
+
     @MainActor
     func testLiveTypingAroundAParagraphBreakStaysResponsive() throws {
         let app = XCUIApplication()
