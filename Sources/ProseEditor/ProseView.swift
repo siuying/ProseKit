@@ -251,6 +251,7 @@ import UIKit
             fallback: bounds
         ))
         scrollCaretToVisible()
+        onStateChange?()
     }
 
     /// Reveals the Selection's head after local edits and keyboard caret
@@ -343,7 +344,25 @@ import UIKit
             drawHighlights(for: typeset.line, lineOrigin: origin, in: context)
             context.textPosition = origin
             CTLineDraw(typeset.line, context)
+            drawLinkTint(for: typeset.line, lineOrigin: origin, in: context)
             drawStrikethrough(for: typeset.line, lineOrigin: origin, in: context)
+        }
+    }
+
+    /// Recolours link runs in the link tint after the line is drawn in the body
+    /// colour. Links don't carry an explicit CoreText foreground (that would leak
+    /// into the shared context fill that foreground-from-context runs read); the
+    /// tint is overpainted here, like highlight and strikethrough.
+    private func drawLinkTint(for line: CTLine, lineOrigin: CGPoint, in context: CGContext) {
+        let runs = CTLineGetGlyphRuns(line) as? [CTRun] ?? []
+        for run in runs {
+            let attributes = CTRunGetAttributes(run) as NSDictionary
+            guard attributes[BlockStyle.linkAttributeName] != nil else { continue }
+            context.saveGState()
+            context.setFillColor(BlockStyle.linkColor)
+            context.textPosition = lineOrigin
+            CTRunDraw(run, context, CFRange(location: 0, length: 0))
+            context.restoreGState()
         }
     }
 
@@ -488,6 +507,7 @@ import UIKit
             )
             canvas.setNeedsDisplay()
             inputDelegate?.selectionDidChange(self)
+            onStateChange?()
         }
     }
 
@@ -790,6 +810,41 @@ import UIKit
 
     public func toggleItalic() {
         runCommand(Commands.toggleMark(.italic))
+    }
+
+    public func toggleStrike() { runCommand(Commands.toggleMark(Mark(type: "strike"))) }
+    public func toggleUnderline() { runCommand(Commands.toggleMark(Mark(type: "underline"))) }
+    public func toggleSuperscript() { runCommand(Commands.toggleMark(Mark(type: "superscript"))) }
+    public func toggleSubscript() { runCommand(Commands.toggleMark(Mark(type: "subscript"))) }
+
+    public func toggleHighlight(_ hex: String) {
+        runCommand(Commands.toggleMark(Mark(type: "highlight", attrs: ["color": .string(hex)])))
+    }
+
+    public func setLink(_ href: String) { runCommand(Commands.setLink(href: href)) }
+    public func setTextAlign(_ value: String?) { runCommand(Commands.setTextAlign(value)) }
+    public func setBlockType(headingLevel level: Int?) { runCommand(Commands.setBlockType(headingLevel: level)) }
+
+    // MARK: - Active state (toolbar binding)
+
+    public func isActive(_ mark: Mark) -> Bool { state.isActive(mark) }
+    public var activeBlockType: String { state.activeBlockType }
+    public var activeHeadingLevel: Int? { state.activeHeadingLevel }
+
+    /// Called after any edit or selection change so a host toolbar can refresh
+    /// its active-state highlighting.
+    public var onStateChange: (() -> Void)?
+
+    private var customInputAccessoryView: UIView?
+
+    /// A host-supplied accessory view (e.g. a formatting toolbar) shown above
+    /// the keyboard. UIKit positions and animates it; the editor's keyboard
+    /// avoidance already accounts for its height.
+    public override var inputAccessoryView: UIView? { customInputAccessoryView }
+
+    public func setInputAccessoryView(_ view: UIView?) {
+        customInputAccessoryView = view
+        if isFirstResponder { reloadInputViews() }
     }
 
     public override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {

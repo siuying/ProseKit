@@ -44,6 +44,19 @@ public enum Commands {
         }
     }
 
+    /// Sets the block at the caret to a heading of `level`, or a paragraph when
+    /// `level` is nil — non-toggling, for a heading dropdown.
+    public static func setBlockType(headingLevel level: Int?) -> Command {
+        Command { state in
+            let (document, selection, changedRange) = try state.document.settingBlockType(
+                at: state.selection.head,
+                headingLevel: level
+            )
+            state.replaceDocument(document, selection: selection, changedRange: changedRange)
+            return true
+        }
+    }
+
     /// Sets the block's `textAlign` (the headless side of the alignment buttons,
     /// slice 13). `nil`/`"left"` clears it.
     public static func setTextAlign(_ value: String?) -> Command {

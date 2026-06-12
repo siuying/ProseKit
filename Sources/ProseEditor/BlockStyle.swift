@@ -31,8 +31,12 @@ enum BlockStyle {
     /// Canvas parses it and fills the run's background before drawing glyphs.
     static let highlightAttributeName = NSAttributedString.Key("ProseHighlight")
 
-    /// The link tint. Baked as a CGColor (not foreground-from-context) so link
-    /// runs read as links; a system-blue that stays legible in light and dark.
+    /// Flags a link run so the Canvas overpaints it in `linkColor` after the
+    /// line is drawn — links do not carry a CoreText foreground attribute, which
+    /// would leak into the shared context fill that other runs read.
+    static let linkAttributeName = NSAttributedString.Key("ProseLink")
+
+    /// The link tint — a system-blue that stays legible in light and dark.
     static let linkColor = CGColor(srgbRed: 0.0, green: 0.48, blue: 1.0, alpha: 1.0)
 
     /// The accumulated CoreText styling for a run, before it becomes a font.
@@ -70,11 +74,12 @@ enum BlockStyle {
             let style = runStyle(for: inline.marks, blockType: block.type)
             var attributes: [NSAttributedString.Key: Any] = [
                 NSAttributedString.Key(kCTFontAttributeName as String): font(for: style, size: size),
+                // Every run draws in the context fill (the body colour, set at
+                // draw time so it adapts to dark mode); links are overpainted.
+                NSAttributedString.Key(kCTForegroundColorFromContextAttributeName as String): true,
             ]
             if style.link {
-                attributes[NSAttributedString.Key(kCTForegroundColorAttributeName as String)] = linkColor
-            } else {
-                attributes[NSAttributedString.Key(kCTForegroundColorFromContextAttributeName as String)] = true
+                attributes[linkAttributeName] = true
             }
             if style.underline {
                 attributes[NSAttributedString.Key(kCTUnderlineStyleAttributeName as String)] =

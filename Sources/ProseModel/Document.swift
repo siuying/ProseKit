@@ -274,6 +274,22 @@ public struct Document: Codable, Hashable, Sendable {
         )
     }
 
+    /// Sets the block at `position` to a specific type — a heading of `level`,
+    /// or a paragraph when `level` is nil — without toggling. Unlike
+    /// `togglingHeading`, choosing a different heading level changes the level
+    /// rather than reverting to a paragraph (what a heading dropdown needs).
+    public func settingBlockType(at position: Position, headingLevel level: Int?) throws -> (Document, TextSelection, Range<Position>) {
+        guard let info = blockInfo(containing: position) else {
+            throw StepError.unsupportedReplacement("setBlockType requires a text block")
+        }
+        let updated = level.map(info.node.asHeading(level:)) ?? info.node.asParagraph()
+        return (
+            replacingBlocks(in: info.index..<(info.index + 1), with: [updated]),
+            TextSelection(anchor: position, head: position),
+            info.start..<(info.start + updated.nodeSize)
+        )
+    }
+
     /// Sets (or clears) the `textAlign` Attr on the block at `position`.
     /// Only paragraph and heading carry it (Q9.2); `nil` or `"left"` clears it,
     /// keeping the absent-means-left default rather than storing a redundant Attr.

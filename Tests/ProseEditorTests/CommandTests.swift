@@ -73,6 +73,20 @@ final class CommandTests: XCTestCase {
         XCTAssertEqual(state.document.root.content[0].content[0].marks, [])
     }
 
+    func testSetBlockTypeChangesHeadingLevelWithoutToggling() throws {
+        var state = EditorState(document: Document(.doc([
+            .heading(level: 1, [.text("hi")]),
+        ])), selection: TextSelection(anchor: 4, head: 4))
+
+        XCTAssertTrue(try Commands.setBlockType(headingLevel: 3).run(in: &state))
+        XCTAssertEqual(state.document.root.content[0].type, "heading")
+        XCTAssertEqual(state.document.root.content[0].attrs["level"], .int(3),
+                       "a different level changes the level rather than reverting to paragraph")
+
+        XCTAssertTrue(try Commands.setBlockType(headingLevel: nil).run(in: &state))
+        XCTAssertEqual(state.document.root.content[0].type, "paragraph")
+    }
+
     func testSetTextAlignSetsAndClearsBlockAttr() throws {
         var state = EditorState(document: Document(.doc([
             .paragraph([.text("hello")]),
