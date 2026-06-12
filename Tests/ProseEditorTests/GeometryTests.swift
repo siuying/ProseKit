@@ -42,14 +42,15 @@ final class GeometryTests: XCTestCase {
         XCTAssertGreaterThan(fragments.count, 1, "expected the paragraph to wrap")
 
         // Select from mid-first-line to mid-second-line.
-        let anchor = fragments[0].positionRange.lowerBound + 2
-        let head = fragments[1].positionRange.lowerBound + 3
+        let blockStart = layout.children[0].positionRange.lowerBound
+        let anchor = blockStart + fragments[0].positionRange.lowerBound + 2
+        let head = blockStart + fragments[1].positionRange.lowerBound + 3
         let rects = mapper.selectionRects(for: TextSelection(anchor: anchor, head: head), in: layout)
 
         XCTAssertEqual(rects.count, 2)
         XCTAssertEqual(rects[0].minX, mapper.caretRect(for: anchor, in: layout).minX, accuracy: 0.5)
-        XCTAssertEqual(rects[0].minY, fragments[0].frame.minY, accuracy: 0.5)
-        XCTAssertEqual(rects[1].minX, fragments[1].frame.minX, accuracy: 0.5)
+        XCTAssertEqual(rects[0].minY, layout.children[0].frame.minY + fragments[0].frame.minY, accuracy: 0.5)
+        XCTAssertEqual(rects[1].minX, layout.children[0].frame.minX + fragments[1].frame.minX, accuracy: 0.5)
         XCTAssertEqual(rects[1].maxX, mapper.caretRect(for: head, in: layout).minX, accuracy: 0.5)
         XCTAssertGreaterThan(rects[0].width, 0)
         XCTAssertGreaterThan(rects[1].width, 0)
@@ -83,13 +84,20 @@ final class GeometryTests: XCTestCase {
         XCTAssertGreaterThan(fragments.count, 1, "expected the paragraph to wrap")
 
         func owningFragment(of position: Position) -> LineFragment? {
-            (layout.children.flatMap(\.lineFragments)).first {
-                $0.positionRange.contains(position) || $0.positionRange.upperBound == position
+            for block in layout.children {
+                let local = position - block.positionRange.lowerBound
+                if let fragment = block.lineFragments.first(where: {
+                    $0.positionRange.contains(local) || $0.positionRange.upperBound == local
+                }) {
+                    return fragment
+                }
             }
+            return nil
         }
 
         // Down from mid-first-line lands on the second line near the same x.
-        let start = fragments[0].positionRange.lowerBound + 3
+        let blockStart = layout.children[0].positionRange.lowerBound
+        let start = blockStart + fragments[0].positionRange.lowerBound + 3
         let below = mapper.position(below: start, in: layout)
         XCTAssertEqual(owningFragment(of: below)?.positionRange, fragments[1].positionRange)
         let startX = mapper.caretRect(for: start, in: layout).minX
@@ -101,12 +109,12 @@ final class GeometryTests: XCTestCase {
         XCTAssertEqual(mapper.caretRect(for: above, in: layout).minX, startX, accuracy: 12)
 
         // Down from the paragraph's last line crosses into the next block.
-        let crossed = mapper.position(below: fragments.last!.positionRange.lowerBound + 1, in: layout)
+        let crossed = mapper.position(below: blockStart + fragments.last!.positionRange.lowerBound + 1, in: layout)
         XCTAssertEqual(owningFragment(of: crossed)?.positionRange, layout.children[1].lineFragments[0].positionRange)
 
         // Clamps: up from the first line and down from the last line hit the text edges.
         XCTAssertEqual(mapper.position(above: start, in: layout), 2)
-        let lastTextPosition = layout.children[1].lineFragments[0].positionRange.upperBound
+        let lastTextPosition = layout.children[1].positionRange.lowerBound + layout.children[1].lineFragments[0].positionRange.upperBound
         XCTAssertEqual(mapper.position(below: crossed, in: layout), lastTextPosition)
     }
 

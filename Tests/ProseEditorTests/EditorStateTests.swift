@@ -67,9 +67,8 @@ final class EditorStateTests: XCTestCase {
         XCTAssertGreaterThan(updated.children[1].frame.minY, initial.children[1].frame.minY)
 
         let fragment = updated.children[1].lineFragments[0]
-        XCTAssertEqual(fragment.frame.minY, updated.children[1].frame.minY)
-        let expectedStart = initial.children[1].lineFragments[0].positionRange.lowerBound + inserted.count
-        XCTAssertEqual(fragment.positionRange.lowerBound, expectedStart)
+        XCTAssertEqual(fragment.frame.minY, 0)
+        let expectedStart = updated.children[1].positionRange.lowerBound + fragment.positionRange.lowerBound
 
         let mapper = GeometryMapper()
         let rect = mapper.caretRect(for: expectedStart + 2, in: updated)

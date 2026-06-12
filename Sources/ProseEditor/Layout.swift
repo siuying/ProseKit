@@ -71,22 +71,10 @@ public struct LayoutBox: Equatable, Sendable {
         self.typesetID = typesetID
     }
 
-    func shifted(toY y: CGFloat, positionRange range: Range<Position>) -> LayoutBox {
-        let deltaY = y - frame.origin.y
-        let deltaPosition = range.lowerBound - positionRange.lowerBound
-        if deltaY == 0, deltaPosition == 0 {
-            return self
-        }
+    func moved(toY y: CGFloat, positionRange range: Range<Position>) -> LayoutBox {
         var copy = self
         copy.frame.origin.y = y
         copy.positionRange = range
-        copy.lineFragments = lineFragments.map { fragment in
-            var shifted = fragment
-            shifted.frame.origin.y += deltaY
-            shifted.positionRange = (fragment.positionRange.lowerBound + deltaPosition)
-                ..< (fragment.positionRange.upperBound + deltaPosition)
-            return shifted
-        }
         return copy
     }
 }
@@ -154,7 +142,7 @@ public struct IncrementalLayoutStore: Sendable {
                !rangesIntersect(range, changedRange),
                oldChildren.indices.contains(oldIndex),
                oldChildren[oldIndex].node == block {
-                let reused = oldChildren[oldIndex].shifted(toY: y, positionRange: range)
+                let reused = oldChildren[oldIndex].moved(toY: y, positionRange: range)
                 y = reused.frame.maxY + 12
                 return reused
             }
@@ -194,14 +182,14 @@ private func typesetLeafBlock(
 ) -> LayoutBox {
     let fragments = typesetLineFragments(
         for: block,
-        textStart: positionRange.lowerBound + 1,
-        y: y,
+        textStart: 1,
+        y: 0,
         width: width
     )
     return LayoutBox(
         kind: .leafBlock,
         node: block,
-        frame: CGRect(x: 0, y: y, width: width, height: (fragments.last?.frame.maxY ?? y) - y),
+        frame: CGRect(x: 0, y: y, width: width, height: fragments.last?.frame.maxY ?? 0),
         lineFragments: fragments,
         positionRange: positionRange,
         typesetID: typesetID

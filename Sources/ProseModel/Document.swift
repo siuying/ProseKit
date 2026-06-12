@@ -1,12 +1,15 @@
 public struct Document: Codable, Hashable, Sendable {
-    public var root: Node
+    public private(set) var root: Node
+    private var endTextPositionValue: Position
 
     public init(_ root: Node) {
         self.root = root
+        self.endTextPositionValue = Self.endTextPosition(in: root)
     }
 
     public init(from decoder: Decoder) throws {
         root = try Node(from: decoder)
+        endTextPositionValue = Self.endTextPosition(in: root)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -18,11 +21,13 @@ public struct Document: Codable, Hashable, Sendable {
     }
 
     public var endTextPosition: Position {
-        var position = endPosition
-        root.walkTextNodes(start: 0, path: []) { _, textStart, text in
-            position = textStart + text.count
-        }
-        return position
+        endTextPositionValue
+    }
+
+    private static func endTextPosition(in root: Node) -> Position {
+        guard let lastBlock = root.content.last else { return root.nodeSize - 1 }
+        let lastBlockStart = root.nodeSize - 1 - lastBlock.nodeSize
+        return lastBlockStart + 1 + lastBlock.plainText.count
     }
 
     public func position(ofBlockAt blockIndex: Int) -> Position? {
