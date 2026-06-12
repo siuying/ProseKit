@@ -203,9 +203,11 @@ import UIKit
         layoutStore.width = bounds.width
         do {
             layoutBox = try layoutStore.layout(state.document, changedRange: changedRange)
+        } catch is SchemaError {
+            // A host handed the editor a document outside the Schema —
+            // rejected input, not a broken invariant. Keep the previous
+            // layout (or stay blank before a first layout).
         } catch {
-            // The Document and Schema disagree — a broken invariant, surfaced
-            // in debug; release keeps the previous layout over a blank view.
             assertionFailure("relayout failed: \(error)")
         }
         canvas.layoutBox = layoutBox
@@ -324,19 +326,24 @@ import UIKit
                 return
             }
         } catch {
+            // canJoinBackward gates the command, so a throw here is a real
+            // invariant break, not a boundary condition.
             assertionFailure("joinBackward failed: \(error)")
         }
         performEdit { try state.deleteBackward() }
     }
 
     /// Runs an edit between the input delegate's will/did notifications and
-    /// repaints the edited region. Edits clamp user input and should not
-    /// throw; a throw means a model invariant broke — surfaced in debug
-    /// builds rather than silently swallowed.
+    /// repaints the edited region. A StepError is an edit the model cannot
+    /// express yet (e.g. deleting a selection that spans blocks) — a designed
+    /// no-op. Any other throw means a model invariant broke, surfaced in
+    /// debug builds rather than silently swallowed.
     private func performEdit(_ edit: () throws -> Void) {
         inputDelegate?.textWillChange(self)
         do {
             try edit()
+        } catch is StepError {
+            // Unsupported edit: leave the document untouched.
         } catch {
             assertionFailure("edit failed: \(error)")
         }

@@ -293,6 +293,37 @@ final class ProseViewTests: XCTestCase {
         XCTAssertEqual(offset, 8, "\"Hello\\n\" is 6 chars, plus 2 into \"world\"")
         XCTAssertEqual((view.position(from: begin, offset: offset) as! ProseTextPosition).position, 11)
     }
+
+    func testDeleteBackwardAtDocumentStartDoesNothing() {
+        let document = Document(.doc([
+            .paragraph([.text("hello")]),
+            .paragraph([.text("world")]),
+        ]))
+        let view = makeView(document)
+        view.selectedTextRange = ProseTextRange(anchor: 2, head: 2)
+
+        // Regression: this asserted (crashing debug builds) instead of
+        // being the inert Backspace UITextView ships.
+        view.deleteBackward()
+
+        XCTAssertEqual(view.document, document)
+        XCTAssertEqual((view.selectedTextRange as? ProseTextRange)?.head, 2)
+    }
+
+    func testDeleteBackwardOverCrossBlockSelectionLeavesDocumentUntouched() {
+        // Deleting a selection that spans blocks is not expressible as a
+        // single-text-node ReplaceStep yet; it must no-op, never trap.
+        let document = Document(.doc([
+            .paragraph([.text("hello")]),
+            .paragraph([.text("world")]),
+        ]))
+        let view = makeView(document)
+        view.selectedTextRange = ProseTextRange(anchor: 4, head: 11)
+
+        view.deleteBackward()
+
+        XCTAssertEqual(view.document, document)
+    }
 }
 
 @MainActor

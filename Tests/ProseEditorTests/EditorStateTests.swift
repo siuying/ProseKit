@@ -63,6 +63,33 @@ final class EditorStateTests: XCTestCase {
         XCTAssertEqual(state.lastTransaction?.changedRange, 4..<5)
     }
 
+    func testDeleteBackwardAtDocumentStartIsANoOp() throws {
+        let document = Document(.doc([.paragraph([.text("hi")])]))
+        var state = EditorState(
+            document: document,
+            selection: TextSelection(anchor: document.startTextPosition, head: document.startTextPosition)
+        )
+
+        // Backspace at the very start of the document must be inert, never
+        // a thrown boundary error (it crashed debug builds as an assertion).
+        XCTAssertNoThrow(try state.deleteBackward())
+        XCTAssertEqual(state.document, document)
+        XCTAssertEqual(state.selection, TextSelection(anchor: 2, head: 2))
+    }
+
+    func testDeleteBackwardAtBlockTextStartIsANoOpWithoutJoinCommand() throws {
+        // The view runs joinBackward first; headless deleteBackward at a
+        // block's text start must no-op rather than throw.
+        let document = Document(.doc([
+            .paragraph([.text("hello")]),
+            .paragraph([.text("world")]),
+        ]))
+        var state = EditorState(document: document, selection: TextSelection(anchor: 9, head: 9))
+
+        XCTAssertNoThrow(try state.deleteBackward())
+        XCTAssertEqual(state.document, document)
+    }
+
     func testTypingMarksInsertSuppliesChangedRange() throws {
         var state = EditorState(document: Document(.doc([
             .paragraph([.text("hi")]),

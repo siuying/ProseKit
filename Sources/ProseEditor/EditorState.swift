@@ -37,7 +37,12 @@ public struct EditorState: Sendable {
             try insertText("")
             return
         }
-        guard selection.head > 0 else { return }
+        // At a block's text start there is no character to the left inside
+        // the block: joining with the previous block is a Command
+        // (joinBackward) the view runs first, and at the document start
+        // Backspace is inert. A designed no-op, not an error.
+        guard let textStart = document.blockTextStart(at: selection.head),
+              selection.head > textStart else { return }
         let head = selection.head - 1
         try dispatch(Transaction(
             steps: [ReplaceStep(from: head, to: selection.head, insertText: "")],
