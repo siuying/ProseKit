@@ -31,6 +31,10 @@ final class RenderingTests: XCTestCase {
 
     private func assertRendersLikeFreshView(_ view: ProseView, _ message: String) {
         let fresh = makeView(view.document)
+        // Edits reveal the caret, so the edited view may have scrolled; the
+        // comparison is between Viewports at the same content position.
+        fresh.contentOffset = view.contentOffset
+        fresh.layoutIfNeeded()
         XCTAssertEqual(render(view), render(fresh), message)
     }
 
@@ -110,9 +114,9 @@ final class RenderingTests: XCTestCase {
                 context.fill(CGRect(origin: .zero, size: Self.size))
                 context.cgContext.saveGState()
                 context.cgContext.clip(to: rect)
-                UIGraphicsPushContext(context.cgContext)
-                view.draw(rect)
-                UIGraphicsPopContext()
+                // The Canvas's draw path; at contentOffset zero its local
+                // space coincides with content space.
+                view.drawCanvas(rect, in: context.cgContext)
                 context.cgContext.restoreGState()
             }
             return image.cgImage

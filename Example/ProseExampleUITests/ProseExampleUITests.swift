@@ -12,6 +12,15 @@ final class ProseExampleUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    /// ProseView is a UIScrollView hosting a UITextInteraction; depending on
+    /// the OS it surfaces as a text view or a scroll view.
+    @MainActor
+    private func editorElement(in app: XCUIApplication) -> XCUIElement {
+        let asTextView = app.textViews.firstMatch
+        if asTextView.waitForExistence(timeout: 5) { return asTextView }
+        return app.scrollViews.firstMatch
+    }
+
     @MainActor
     func testLiveTypingAroundAParagraphBreakStaysResponsive() throws {
         let app = XCUIApplication()
@@ -20,7 +29,7 @@ final class ProseExampleUITests: XCTestCase {
 
         // Tap the editor so the XCUI event synthesizer sees keyboard focus
         // (programmatic becomeFirstResponder is not enough for it).
-        let editor = app.textViews.firstMatch
+        let editor = editorElement(in: app)
         XCTAssertTrue(editor.waitForExistence(timeout: 10))
         editor.tap()
         sleep(2)
@@ -42,4 +51,30 @@ final class ProseExampleUITests: XCTestCase {
         XCTAssertLessThan(timedType("b", label: "first char after Return"), budget)
         XCTAssertLessThan(timedType("c", label: "second char after Return"), budget)
     }
+
+    /// Pins the cost ADR 0002 accepts: every scrolled frame repaints the
+    /// Viewport-sized Canvas. The hitch/frame-time metric is the gate; the
+    /// trailing keystroke proves the app is still responsive afterwards.
+    @MainActor
+    func testFlingScrollingALargeDocumentStaysSmooth() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-paragraphs", "2000"]
+        app.launch()
+
+        let editor = editorElement(in: app)
+        XCTAssertTrue(editor.waitForExistence(timeout: 10))
+
+        measure(metrics: [XCTOSSignpostMetric.scrollingAndDecelerationMetric]) {
+            editor.swipeUp(velocity: .fast)
+            editor.swipeUp(velocity: .fast)
+            editor.swipeDown(velocity: .fast)
+        }
+
+        editor.tap()
+        sleep(2)
+        let start = Date()
+        app.typeText("a")
+        XCTAssertLessThan(Date().timeIntervalSince(start), 5, "typing after a fling must stay responsive")
+    }
+
 }

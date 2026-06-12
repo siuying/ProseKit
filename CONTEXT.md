@@ -115,3 +115,17 @@ _Avoid_: cell, view, line (a Layout Box is not a Runestone "line")
 One visually-wrapped line produced by CoreText within a leaf Layout Box. A long
 paragraph Block Node yields many Line Fragments.
 _Avoid_: line, row
+
+**Viewport**:
+The currently visible window onto the laid-out Document, expressed in content
+coordinates. Scrolling moves the Viewport over the layout; it never moves or
+re-lays-out the Document. Layout exists for every Block Node whether or not
+the Viewport can see it.
+_Avoid_: visible rect, screen, window
+
+**Canvas**:
+The paint surface that draws the **Layout Boxes** intersecting the **Viewport**.
+The Canvas holds no document or geometry authority — it is repainted from the
+layout tree and answers no questions; caret, selection, and hit-testing geometry
+are answered in content coordinates, never Canvas coordinates.
+_Avoid_: content view, backing store, layer

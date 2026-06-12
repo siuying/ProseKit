@@ -4,18 +4,22 @@ import CoreText
 import ProseModel
 import UIKit
 
-@MainActor public final class ProseView: UIView, UITextInput {
+@MainActor public final class ProseView: UIScrollView, UITextInput {
     public var document: Document {
         get { state.document }
         set {
             state = EditorState(document: newValue)
             relayout()
-            setNeedsDisplay()
+            canvas.setNeedsDisplay()
         }
     }
 
     public weak var inputDelegate: UITextInputDelegate?
     public var markedTextStyle: [NSAttributedString.Key: Any]?
+    /// Insets the Viewport for the keyboard automatically (a deliberate
+    /// divergence from UITextView — built-in caret-follow needs it). Hosts
+    /// that manage keyboard insets themselves opt out here.
+    public var automaticallyAdjustsForKeyboard = true
     /// The pasteboard edit-menu actions read and write. Injectable because
     /// `UIPasteboard.general` is unavailable to unhosted test bundles.
     public var pasteboard: UIPasteboard = .general
@@ -25,18 +29,49 @@ import UIKit
     private var layoutBox: LayoutBox?
     private let geometryMapper = GeometryMapper()
     private lazy var proseTokenizer = UITextInputStringTokenizer(textInput: self)
+    /// The Canvas: a Viewport-sized paint surface repositioned on scroll
+    /// (ADR 0002). It holds no document or geometry authority; selection
+    /// chrome and hit-testing live on the scroll view, in content space.
+    private let canvas = CanvasView()
 
     public init(document: Document, schema: Schema = .slice1) {
         self.state = EditorState(document: document)
         self.layoutStore = IncrementalLayoutStore(schema: schema, width: 0)
         super.init(frame: .zero)
         backgroundColor = .systemBackground
-        contentMode = .redraw
+        canvas.isUserInteractionEnabled = false
+        canvas.backgroundColor = .clear
+        canvas.isOpaque = false
+        canvas.drawContent = { [weak self] rect, context in
+            self?.drawCanvas(rect, in: context)
+        }
+        // Below the system selection chrome UITextInteraction installs.
+        addSubview(canvas)
         // The system owns all selection chrome: caret, handles, loupe,
         // double-tap word select, edit menu.
         let textInteraction = UITextInteraction(for: .editable)
         textInteraction.textInput = self
         addInteraction(textInteraction)
+        // Caret-follow is built in, so keyboard avoidance must be too —
+        // otherwise revealing the caret can park it under the keyboard.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(keyboardWillChangeFrame(_:)),
+            name: UIResponder.keyboardWillChangeFrameNotification,
+            object: nil
+        )
+    }
+
+    @objc private func keyboardWillChangeFrame(_ notification: Notification) {
+        guard automaticallyAdjustsForKeyboard,
+              let endFrame = (notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?
+            .cgRectValue else { return }
+        // Screen space → local space keeps the math right while scrolled;
+        // a dismissed keyboard sits below the view and overlaps nothing.
+        let local = convert(endFrame, from: nil)
+        let overlap = min(max(0, bounds.maxY - local.minY), bounds.height)
+        contentInset.bottom = overlap
+        verticalScrollIndicatorInsets.bottom = overlap
     }
 
     @available(*, unavailable)
@@ -52,22 +87,43 @@ import UIKit
         // whole document here would defeat incremental relayout.
         if layoutBox == nil || layoutStore.width != bounds.width {
             relayout()
+            canvas.setNeedsDisplay()
+        }
+        // bounds.origin is the contentOffset, so pinning the Canvas to bounds
+        // keeps it over the Viewport; every move shows a different layout
+        // slice, so the whole Canvas repaints.
+        if canvas.frame != bounds {
+            canvas.frame = bounds
+            canvas.setNeedsDisplay()
         }
     }
 
-    public override func draw(_ rect: CGRect) {
-        guard let layoutBox, let context = UIGraphicsGetCurrentContext() else { return }
+    /// Paints the Layout Boxes intersecting the dirty region. `rect` is
+    /// Canvas-local; blocks live in content space, offset by the Canvas's
+    /// origin (the contentOffset). Internal so the culling-equivalence
+    /// rendering test can drive it directly.
+    func drawCanvas(_ rect: CGRect, in context: CGContext) {
+        guard let layoutBox else { return }
+        let origin = canvas.frame.origin
+        // Outset for glyph overhang: descenders of a block ending just above
+        // the dirty region still paint into it.
+        let contentRect = rect
+            .offsetBy(dx: origin.x, dy: origin.y)
+            .insetBy(dx: 0, dy: -Self.glyphOverhang)
         context.saveGState()
-        // CoreText draws in a bottom-left coordinate space; flip to UIKit's.
+        // CoreText draws in a bottom-left coordinate space; flip to UIKit's
+        // about the layout height, then shift content space into the Canvas.
+        let flipHeight = layoutBox.frame.height
         context.textMatrix = .identity
-        context.translateBy(x: 0, y: bounds.height)
+        context.translateBy(x: -origin.x, y: -origin.y)
+        context.translateBy(x: 0, y: flipHeight)
         context.scaleBy(x: 1, y: -1)
         context.setFillColor(UIColor.label.cgColor)
         for box in layoutBox.children {
             // Blocks are y-ordered; everything past the dirty rect is clean.
-            if box.frame.minY > rect.maxY { break }
-            guard box.frame.intersects(rect) else { continue }
-            draw(block: box, in: context)
+            if box.frame.minY > contentRect.maxY { break }
+            guard box.frame.intersects(contentRect) else { continue }
+            draw(block: box, in: context, flippedAbout: flipHeight)
         }
         context.restoreGState()
     }
@@ -76,6 +132,7 @@ import UIKit
         guard bounds.width > 0 else { return }
         layoutStore.width = bounds.width
         layoutBox = try? layoutStore.layout(state.document, changedRange: changedRange)
+        contentSize = layoutBox?.frame.size ?? .zero
     }
 
     /// Relayouts for the last transaction and invalidates only the region
@@ -86,11 +143,47 @@ import UIKit
     private func relayoutAndDisplayEdit() {
         let previous = layoutBox
         relayout(changedRange: state.lastTransaction?.changedRange)
-        setNeedsDisplay(Self.editDirtyRect(
+        setCanvasNeedsDisplay(Self.editDirtyRect(
             from: previous,
             to: layoutBox,
             changedRange: state.lastTransaction?.changedRange,
             fallback: bounds
+        ))
+        scrollCaretToVisible()
+    }
+
+    /// Reveals the Selection's head after local edits and keyboard caret
+    /// moves, like UITextView. Programmatic document or selection changes
+    /// never scroll; hosts reveal explicitly via scrollRangeToVisible.
+    private func scrollCaretToVisible() {
+        guard let layoutBox else { return }
+        reveal(geometryMapper.caretRect(for: state.selection.head, in: layoutBox))
+    }
+
+    /// Scrolls the minimum amount to bring the range into the Viewport —
+    /// the host's explicit reveal, mirroring UITextView's
+    /// scrollRangeToVisible. Programmatic selection changes never scroll.
+    public func scrollRangeToVisible(_ range: UITextRange) {
+        guard let range = range as? ProseTextRange, let layoutBox else { return }
+        let rects = geometryMapper.selectionRects(for: range.textSelection, in: layoutBox)
+        let target = rects.reduce(CGRect.null) { $0.union($1) }
+        reveal(target.isNull
+            ? geometryMapper.caretRect(for: range.textSelection.head, in: layoutBox)
+            : target)
+    }
+
+    /// Minimal scroll showing a content rect, with breathing room so the
+    /// target isn't glued to the Viewport edge.
+    private func reveal(_ contentRect: CGRect) {
+        scrollRectToVisible(contentRect.insetBy(dx: 0, dy: -8), animated: false)
+    }
+
+    /// Invalidates a content-space rect on the Canvas, which is offset from
+    /// content space by its origin (the contentOffset).
+    private func setCanvasNeedsDisplay(_ contentRect: CGRect) {
+        canvas.setNeedsDisplay(contentRect.offsetBy(
+            dx: -canvas.frame.origin.x,
+            dy: -canvas.frame.origin.y
         ))
     }
 
@@ -131,16 +224,20 @@ import UIKit
             x: 0, y: dirty.minY,
             width: max(fallback.width, dirty.width),
             height: dirty.height
-        ).insetBy(dx: 0, dy: -2)
+        ).insetBy(dx: 0, dy: -glyphOverhang)
     }
 
-    private func draw(block: LayoutBox, in context: CGContext) {
+    /// How far glyphs may paint outside their block's frame (descenders,
+    /// diacritics); dirty regions widen by this on both sides.
+    private static let glyphOverhang: CGFloat = 2
+
+    private func draw(block: LayoutBox, in context: CGContext, flippedAbout flipHeight: CGFloat) {
         for fragment in block.lineFragments {
             guard let typeset = fragment.typesetLine else { continue }
             let baseline = block.frame.minY + fragment.frame.minY + typeset.ascent
             context.textPosition = CGPoint(
                 x: block.frame.minX + fragment.frame.minX,
-                y: bounds.height - baseline
+                y: flipHeight - baseline
             )
             CTLineDraw(typeset.line, context)
         }
@@ -222,7 +319,7 @@ import UIKit
                 lastTransaction: state.lastTransaction,
                 typingMarks: state.typingMarks
             )
-            setNeedsDisplay()
+            canvas.setNeedsDisplay()
             inputDelegate?.selectionDidChange(self)
         }
     }
@@ -602,7 +699,9 @@ import UIKit
         }
     }
 
-    private func moveCaret(_ direction: UITextLayoutDirection, extending: Bool) {
+    /// Keyboard caret movement (arrow keys). Internal so tests can drive it:
+    /// UIPress events cannot be synthesized.
+    func moveCaret(_ direction: UITextLayoutDirection, extending: Bool) {
         let selection = state.selection
 
         if !extending, !selection.isCollapsed, direction == .left || direction == .right {
@@ -611,6 +710,7 @@ import UIKit
                 ? min(selection.anchor, selection.head)
                 : max(selection.anchor, selection.head)
             selectedTextRange = ProseTextRange(anchor: edge, head: edge)
+            scrollCaretToVisible()
             return
         }
 
@@ -618,6 +718,7 @@ import UIKit
             return
         }
         selectedTextRange = ProseTextRange(anchor: extending ? selection.anchor : head.position, head: head.position)
+        scrollCaretToVisible()
     }
 
     private func clamp(_ position: Position) -> Position {
@@ -641,5 +742,16 @@ import UIKit
         runCommand(Commands.toggleMark(.italic))
     }
 
+}
+
+/// The Canvas's view: a dumb paint surface. All drawing logic stays in
+/// ProseView; the Canvas only forwards its dirty rects.
+@MainActor private final class CanvasView: UIView {
+    var drawContent: ((CGRect, CGContext) -> Void)?
+
+    override func draw(_ rect: CGRect) {
+        guard let context = UIGraphicsGetCurrentContext() else { return }
+        drawContent?(rect, context)
+    }
 }
 #endif
