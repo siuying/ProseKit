@@ -46,7 +46,13 @@ import UIKit
 
     public override func layoutSubviews() {
         super.layoutSubviews()
-        relayout()
+        // Width is the only layout input UIKit owns; edits relayout
+        // themselves with a Changed Range. UITextInteraction's selection
+        // chrome dirties layout on every keystroke, and re-typesetting the
+        // whole document here would defeat incremental relayout.
+        if layoutBox == nil || layoutStore.width != bounds.width {
+            relayout()
+        }
     }
 
     public override func draw(_ rect: CGRect) {
@@ -112,7 +118,7 @@ import UIKit
     }
 
     public var hasText: Bool {
-        !state.document.plainText.isEmpty
+        state.document.totalTextCount > 0
     }
 
     public func insertText(_ text: String) {
@@ -186,20 +192,41 @@ import UIKit
 
     /// Plain text between two positions; block boundaries read as "\n" so
     /// ranges spanning blocks (Select All, tokenizer context) stay readable.
+    /// Materializes text only for blocks the range intersects — UIKit's
+    /// keyboard calls this around every keystroke.
     private func plainText(from: Position, to: Position) -> String {
+        let document = state.document
         var pieces: [String] = []
-        for (index, block) in state.document.root.content.enumerated() {
-            guard let textStart = state.document.position(ofTextInBlockAt: index) else { continue }
-            let text = block.plainText
-            let textEnd = textStart + text.count
-            guard from <= textEnd, to >= textStart else { continue }
+        guard let firstIndex = firstBlockIndex(withTextEndAtOrAfter: from) else { return "" }
+        for index in firstIndex..<document.blockCount {
+            guard let textStart = document.position(ofTextInBlockAt: index),
+                  let count = document.textCount(ofBlockAt: index) else { continue }
+            guard to >= textStart else { break }
+            let text = document.root.content[index].plainText
             let lower = max(from, textStart)
-            let upper = min(to, textEnd)
+            let upper = min(to, textStart + count)
             let start = text.index(text.startIndex, offsetBy: lower - textStart)
             let end = text.index(text.startIndex, offsetBy: upper - textStart)
             pieces.append(String(text[start..<end]))
         }
         return pieces.joined(separator: "\n")
+    }
+
+    /// First block whose text end (textStart + count) is >= position;
+    /// binary search over the Document's block index.
+    private func firstBlockIndex(withTextEndAtOrAfter position: Position) -> Int? {
+        let document = state.document
+        let count = document.blockCount
+        guard count > 0 else { return nil }
+        var low = 0
+        var high = count - 1
+        while low < high {
+            let mid = (low + high) / 2
+            let textEnd = document.position(ofTextInBlockAt: mid)! + document.textCount(ofBlockAt: mid)!
+            if textEnd >= position { high = mid } else { low = mid + 1 }
+        }
+        let textEnd = document.position(ofTextInBlockAt: low)! + document.textCount(ofBlockAt: low)!
+        return textEnd >= position ? low : nil
     }
 
     public func replace(_ range: UITextRange, withText text: String) {
@@ -274,31 +301,40 @@ import UIKit
     /// character space to agree with text(in:). Inverse of
     /// position(atCharacterOffset:).
     private func characterOffset(of position: Position) -> Int {
-        var characters = 0
-        for (index, block) in state.document.root.content.enumerated() {
-            guard let textStart = state.document.position(ofTextInBlockAt: index) else { continue }
-            if index > 0 { characters += 1 }
-            let text = block.plainText
-            if position <= textStart + text.count {
-                return characters + max(0, position - textStart)
-            }
-            characters += text.count
+        let document = state.document
+        guard document.blockCount > 0 else { return 0 }
+        guard let index = firstBlockIndex(withTextEndAtOrAfter: position) else {
+            // Past every block: total characters plus one "\n" per boundary.
+            return document.totalTextCount + document.blockCount - 1
         }
-        return characters
+        let textStart = document.position(ofTextInBlockAt: index)!
+        let charactersBefore = document.textCharacters(beforeBlockAt: index)! + index
+        return charactersBefore + max(0, position - textStart)
     }
 
     private func position(atCharacterOffset offset: Int) -> Position {
-        var remaining = offset
-        for (index, block) in state.document.root.content.enumerated() {
-            guard let textStart = state.document.position(ofTextInBlockAt: index) else { continue }
-            if index > 0 { remaining -= 1 }
-            let count = block.plainText.count
-            if remaining <= count {
-                return textStart + max(0, remaining)
-            }
-            remaining -= count
+        let document = state.document
+        let count = document.blockCount
+        guard count > 0 else { return document.endTextPosition }
+        // First block whose joined-character end (charStart + index + textCount)
+        // is >= offset; the "\n" before a block maps to the previous block's end.
+        var low = 0
+        var high = count - 1
+        while low < high {
+            let mid = (low + high) / 2
+            if characterEnd(ofBlockAt: mid, in: document) >= offset { high = mid } else { low = mid + 1 }
         }
-        return state.document.endTextPosition
+        guard characterEnd(ofBlockAt: low, in: document) >= offset else {
+            return document.endTextPosition
+        }
+        let textStart = document.position(ofTextInBlockAt: low)!
+        let characterStart = document.textCharacters(beforeBlockAt: low)! + low
+        return textStart + max(0, offset - characterStart)
+    }
+
+    /// Offset just past the block's text in "\n"-joined character space.
+    private func characterEnd(ofBlockAt index: Int, in document: Document) -> Int {
+        document.textCharacters(beforeBlockAt: index)! + index + document.textCount(ofBlockAt: index)!
     }
 
     private func textPosition(_ position: Position, movedByCharacterOffset offset: Int) -> Position {

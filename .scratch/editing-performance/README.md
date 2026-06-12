@@ -49,3 +49,6 @@ Source material:
 - `issues/01-incremental-relayout-on-every-edit-path.md` — AFK
 - `issues/02-block-relative-geometry.md` — AFK, blocked by 01
 - `issues/03-typing-at-start-anomaly-gated.md` — AFK, blocked by 01
+- `issues/04-live-keyboard-path-stall.md` — diagnosed and fixed 2026-06-12
+  (first char after focus/Return stalled seconds; O(blocks²) document reads
+  on the UITextInput surface + full re-typeset from layoutSubviews)
