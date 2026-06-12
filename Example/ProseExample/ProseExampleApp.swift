@@ -39,58 +39,56 @@ private struct Demo: Identifiable, Hashable {
     let subtitle: String
     let icon: String
     var showsFormattingBar = false
+    var makeDocument: () -> Document = { Document(.doc([])) }
+
+    static func == (lhs: Demo, rhs: Demo) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
 
     static let all: [Demo] = [
         Demo(
             id: "simple",
             title: "Simple Editor",
             subtitle: "Tiptap-parity formatting bar: headings, every inline mark, highlight, links, and alignment",
-            icon: "textformat"
+            icon: "textformat",
+            makeDocument: { .simpleEditor }
         ),
         Demo(
             id: "basics",
             title: "Rich Text Basics",
             subtitle: "Headings, paragraphs, and inline marks rendered by the CoreText engine",
-            icon: "doc.richtext"
+            icon: "doc.richtext",
+            makeDocument: { .basics }
         ),
         Demo(
             id: "formatting",
             title: "Marks & Formatting",
             subtitle: "Toggle bold, italic, code, and headings from a toolbar or ⌘B/⌘I",
             icon: "bold.italic.underline",
-            showsFormattingBar: true
+            showsFormattingBar: true,
+            makeDocument: { .formatting }
         ),
         Demo(
             id: "selection",
             title: "Selection & Autoscroll",
             subtitle: "System selection handles, edit menu, and drag-to-edge autoscroll",
-            icon: "text.cursor"
+            icon: "text.cursor",
+            makeDocument: { .selection }
         ),
         Demo(
             id: "structure",
             title: "Structural Editing",
             subtitle: "Return splits a block, Backspace at the start joins it with the previous one",
-            icon: "rectangle.split.3x1"
+            icon: "rectangle.split.3x1",
+            makeDocument: { .structure }
         ),
         Demo(
             id: "large",
             title: "Large Document",
             subtitle: "2,000 paragraphs: fling scrolling, keyboard avoidance, responsive typing",
-            icon: "scroll"
+            icon: "scroll",
+            makeDocument: { .synthetic(paragraphs: 2000) }
         ),
     ]
-
-    func makeDocument() -> Document {
-        switch id {
-        case "simple": return .simpleEditor
-        case "basics": return .basics
-        case "formatting": return .formatting
-        case "selection": return .selection
-        case "structure": return .structure
-        case "large": return .synthetic(paragraphs: 2000)
-        default: return Document(.doc([]))
-        }
-    }
 }
 
 private struct DemoListView: View {
@@ -141,9 +139,9 @@ private struct DemoEditorScreen: View {
                 if demo.showsFormattingBar {
                     ToolbarItemGroup(placement: .topBarTrailing) {
                         Button("Heading", systemImage: "textformat.size") { editor.view?.toggleHeading() }
-                        Button("Bold", systemImage: "bold") { editor.view?.toggleBold() }
-                        Button("Italic", systemImage: "italic") { editor.view?.toggleItalic() }
-                        Button("Code", systemImage: "chevron.left.forwardslash.chevron.right") { editor.view?.toggleCode() }
+                        Button("Bold", systemImage: "bold") { editor.view?.toggleMark(.bold) }
+                        Button("Italic", systemImage: "italic") { editor.view?.toggleMark(.italic) }
+                        Button("Code", systemImage: "chevron.left.forwardslash.chevron.right") { editor.view?.toggleMark(.code) }
                     }
                 }
             }
@@ -197,6 +195,18 @@ private struct SimpleEditorView: UIViewRepresentable {
 private struct SimpleEditorToolbar: View {
     @ObservedObject var editor: EditorProxy
 
+    /// One row per inline Mark button: the Mark it toggles, its SF Symbol,
+    /// and its accessibility label. The single source for the mark buttons.
+    private static let markItems: [(mark: Mark, symbol: String, label: String)] = [
+        (.bold, "bold", "Bold"),
+        (.italic, "italic", "Italic"),
+        (.underline, "underline", "Underline"),
+        (.strike, "strikethrough", "Strikethrough"),
+        (.code, "chevron.left.forwardslash.chevron.right", "Inline code"),
+        (.superscript, "textformat.superscript", "Superscript"),
+        (.subscript, "textformat.subscript", "Subscript"),
+    ]
+
     // The default highlight swatches (mirrors HighlightColor's palette).
     private let swatches = ["#ffd54f", "#ff8a80", "#80d8ff", "#ccff90", "#ea80fc"]
 
@@ -207,13 +217,9 @@ private struct SimpleEditorToolbar: View {
 
                 Divider().frame(height: 24)
 
-                mark("bold", "Bold")
-                mark("italic", "Italic")
-                mark("underline", "Underline")
-                mark("strike", "Strikethrough")
-                mark("code", "Inline code")
-                mark("superscript", "Superscript")
-                mark("subscript", "Subscript")
+                ForEach(Self.markItems, id: \.mark) { item in
+                    markButton(item.mark, symbol: item.symbol, label: item.label)
+                }
 
                 Divider().frame(height: 24)
 
@@ -238,14 +244,14 @@ private struct SimpleEditorToolbar: View {
         .id(editor.revision)
     }
 
-    private func mark(_ type: String, _ label: String) -> some View {
+    private func markButton(_ mark: Mark, symbol: String, label: String) -> some View {
         Button {
-            editor.toggle(type)
+            editor.view?.toggleMark(mark)
         } label: {
-            Image(systemName: symbol(for: type))
+            Image(systemName: symbol)
         }
         .buttonStyle(.bordered)
-        .tint(editor.isActive(type) ? .accentColor : .secondary)
+        .tint(editor.isActive(mark) ? .accentColor : .secondary)
         .accessibilityLabel(label)
     }
 
@@ -277,7 +283,7 @@ private struct SimpleEditorToolbar: View {
     private var highlightMenu: some View {
         Menu {
             ForEach(swatches, id: \.self) { hex in
-                Button(hex) { editor.view?.toggleHighlight(hex) }
+                Button(hex) { editor.view?.toggleMark(.highlight(color: hex)) }
             }
         } label: {
             Image(systemName: "highlighter")
@@ -317,21 +323,8 @@ private struct SimpleEditorToolbar: View {
         view.onStateChange = { [weak self] in self?.revision &+= 1 }
     }
 
-    func toggle(_ type: String) {
-        switch type {
-        case "bold": view?.toggleBold()
-        case "italic": view?.toggleItalic()
-        case "underline": view?.toggleUnderline()
-        case "strike": view?.toggleStrike()
-        case "code": view?.toggleCode()
-        case "superscript": view?.toggleSuperscript()
-        case "subscript": view?.toggleSubscript()
-        default: break
-        }
-    }
-
-    func isActive(_ type: String) -> Bool {
-        view?.isActive(Mark(type: type)) ?? false
+    func isActive(_ mark: Mark) -> Bool {
+        view?.isActive(mark) ?? false
     }
 
     var headingLevel: Int? { view?.activeHeadingLevel }

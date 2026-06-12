@@ -10,6 +10,18 @@ public struct Mark: Codable, Hashable, Sendable {
     public static let bold = Mark(type: "bold")
     public static let italic = Mark(type: "italic")
     public static let code = Mark(type: "code")
+    public static let strike = Mark(type: "strike")
+    public static let underline = Mark(type: "underline")
+    public static let superscript = Mark(type: "superscript")
+    public static let `subscript` = Mark(type: "subscript")
+
+    public static func highlight(color: String) -> Mark {
+        Mark(type: "highlight", attrs: ["color": .string(color)])
+    }
+
+    public static func link(href: String) -> Mark {
+        Mark(type: "link", attrs: ["href": .string(href)])
+    }
 
     private enum CodingKeys: String, CodingKey {
         case type

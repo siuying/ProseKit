@@ -45,27 +45,30 @@ final class DerivedIndexTests: XCTestCase {
     func testSplitBlockDerivesIndex() throws {
         for blockIndex in [0, 1, 3] {
             let position = document.position(ofTextInBlockAt: blockIndex)! + 2
-            let (split, _, _) = try document.splitBlock(at: position)
+            let split = try document.splitBlock(at: position).document
             assertIndexMatchesRebuild(split, "split block \(blockIndex)")
         }
     }
 
     func testJoinBackwardDerivesIndex() throws {
         let mergeAt = document.position(ofTextInBlockAt: 1)!
-        let (merged, _, _) = try XCTUnwrap(document.joinBackward(at: mergeAt))
+        let merged = try XCTUnwrap(document.joinBackward(at: mergeAt)).document
         assertIndexMatchesRebuild(merged, "merging join")
 
         let emptyAt = document.position(ofTextInBlockAt: 2)!
-        let (removed, _, _) = try XCTUnwrap(document.joinBackward(at: emptyAt))
+        let removed = try XCTUnwrap(document.joinBackward(at: emptyAt)).document
         assertIndexMatchesRebuild(removed, "empty-block join")
     }
 
-    func testTogglingHeadingDerivesIndex() throws {
+    func testSettingBlockTypeDerivesIndex() throws {
         let position = document.position(ofTextInBlockAt: 1)!
-        let (toggled, _, _) = try document.togglingHeading(at: position, level: 2)
+        let toggled = try document.settingBlockType(at: position, headingLevel: 2).document
         assertIndexMatchesRebuild(toggled, "paragraph to heading")
 
-        let (untoggled, _, _) = try document.togglingHeading(at: document.position(ofTextInBlockAt: 0)!, level: 1)
+        let untoggled = try document.settingBlockType(
+            at: document.position(ofTextInBlockAt: 0)!,
+            headingLevel: nil
+        ).document
         assertIndexMatchesRebuild(untoggled, "heading to paragraph")
     }
 
@@ -80,7 +83,7 @@ final class DerivedIndexTests: XCTestCase {
 
     func testEditingDownToAnEmptyDocumentDerivesIndex() throws {
         let single = Document(.doc([.paragraph([]), .paragraph([])]))
-        let (joined, _, _) = try XCTUnwrap(single.joinBackward(at: single.position(ofTextInBlockAt: 1)!))
+        let joined = try XCTUnwrap(single.joinBackward(at: single.position(ofTextInBlockAt: 1)!)).document
         assertIndexMatchesRebuild(joined, "join down to one block")
     }
 }

@@ -126,8 +126,8 @@ final class EditorStateTests: XCTestCase {
         var store = IncrementalLayoutStore(schema: .slice1, width: 240)
         let initial = try store.layout(document)
 
-        let (updatedDocument, _, changedRange) = try document.splitBlock(at: 4)
-        let updated = try store.layout(updatedDocument, changedRange: changedRange)
+        let split = try document.splitBlock(at: 4)
+        let updated = try store.layout(split.document, changedRange: split.changedRange)
 
         XCTAssertEqual(updated.children.count, 4)
         XCTAssertEqual(updated.children[3].node.plainText, "gamma")

@@ -10,7 +10,10 @@ public struct StepApplication: Equatable, Sendable {
 
 public protocol Step: Sendable {
     func apply(to document: Document) throws -> StepApplication
-    func inverted(in document: Document) throws -> ReplaceStep
+    /// The Step that undoes this one, computed against the Document *before*
+    /// this Step is applied (history applies inversions in reverse order).
+    func inverted(in document: Document) throws -> any Step
+    /// Remaps a Position across this Step (CONTEXT glossary: Mapping).
     func map(_ position: Position) -> Position
 }
 
@@ -18,22 +21,26 @@ public struct ReplaceStep: Step, Codable, Equatable, Sendable {
     public var from: Position
     public var to: Position
     public var insertText: String
+    /// Marks applied to the inserted text — the pending typing Marks at a
+    /// collapsed caret. Empty means the insertion joins the surrounding run.
+    public var insertMarks: [Mark]
 
-    public init(from: Position, to: Position, insertText: String) {
+    public init(from: Position, to: Position, insertText: String, insertMarks: [Mark] = []) {
         self.from = from
         self.to = to
         self.insertText = insertText
+        self.insertMarks = insertMarks
     }
 
     public func apply(to document: Document) throws -> StepApplication {
-        let replaced = try document.replacingText(from: from, to: to, with: insertText)
+        let replaced = try document.replacingText(from: from, to: to, with: insertText, marks: insertMarks)
         return StepApplication(
             document: replaced,
             changedRange: from..<max(from + insertText.count, from + 1)
         )
     }
 
-    public func inverted(in document: Document) throws -> ReplaceStep {
+    public func inverted(in document: Document) throws -> any Step {
         let deleted = try document.text(from: from, to: to)
         return ReplaceStep(from: from, to: from + insertText.count, insertText: deleted)
     }
@@ -46,6 +53,28 @@ public struct ReplaceStep: Step, Codable, Equatable, Sendable {
             return position + insertText.count - (to - from)
         }
         return from + insertText.count
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case from, to, insertText, insertMarks
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        from = try container.decode(Position.self, forKey: .from)
+        to = try container.decode(Position.self, forKey: .to)
+        insertText = try container.decode(String.self, forKey: .insertText)
+        insertMarks = try container.decodeIfPresent([Mark].self, forKey: .insertMarks) ?? []
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(from, forKey: .from)
+        try container.encode(to, forKey: .to)
+        try container.encode(insertText, forKey: .insertText)
+        if !insertMarks.isEmpty {
+            try container.encode(insertMarks, forKey: .insertMarks)
+        }
     }
 }
 
@@ -60,7 +89,7 @@ public enum StepError: Error, Equatable, CustomStringConvertible {
     }
 }
 
-public struct AddMarkStep: Codable, Equatable, Sendable {
+public struct AddMarkStep: Step, Codable, Equatable, Sendable {
     public var from: Position
     public var to: Position
     public var mark: Mark
@@ -75,12 +104,16 @@ public struct AddMarkStep: Codable, Equatable, Sendable {
         StepApplication(document: try document.addingMark(from: from, to: to, mark: mark), changedRange: from..<to)
     }
 
-    public func inverted(in document: Document) throws -> RemoveMarkStep {
+    public func inverted(in document: Document) throws -> any Step {
         RemoveMarkStep(from: from, to: to, mark: mark)
+    }
+
+    public func map(_ position: Position) -> Position {
+        position
     }
 }
 
-public struct RemoveMarkStep: Codable, Equatable, Sendable {
+public struct RemoveMarkStep: Step, Codable, Equatable, Sendable {
     public var from: Position
     public var to: Position
     public var mark: Mark
@@ -95,7 +128,11 @@ public struct RemoveMarkStep: Codable, Equatable, Sendable {
         StepApplication(document: try document.removingMark(from: from, to: to, mark: mark), changedRange: from..<to)
     }
 
-    public func inverted(in document: Document) throws -> AddMarkStep {
+    public func inverted(in document: Document) throws -> any Step {
         AddMarkStep(from: from, to: to, mark: mark)
+    }
+
+    public func map(_ position: Position) -> Position {
+        position
     }
 }
