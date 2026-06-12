@@ -78,6 +78,13 @@ history (undo/redo). Lets observers and the history Extension distinguish edits;
 the seam that keeps future collaboration tractable without inverting authority.
 _Avoid_: source, author
 
+**History**:
+The undo/redo record: a stack of undo entries, each holding the inverted
+**Steps** of one or more coalesced **Transactions**. Replaying an entry
+produces a Transaction tagged with the history **Origin**; entries are carried
+forward across later edits via **Mapping**.
+_Avoid_: undo manager (that's the system bridge, not the record), undo stack
+
 **Schema**:
 The declared, extensible set of Node types and Mark types and their rules (which
 Nodes may contain which). The Document must conform to its Schema.
@@ -95,6 +102,12 @@ The part of an **Extension** that turns model into pixels: a Mark's hook maps it
 CoreText attributes; a Block Node's hook maps it to a **Layout Box**. The custom
 CoreText engine's replacement for ProseMirror's DOM serialization.
 _Avoid_: toDOM, nodeView, renderer
+
+**Input Rule**:
+A pattern watched at the caret during typing that, on match, rewrites the
+just-typed text into structure or formatting (e.g. `# ` becomes a heading).
+Backspace immediately after a match reverts it to the literal text.
+_Avoid_: autocorrect, autoformat, markdown shortcut (that's one family of them)
 
 **Command**:
 A pure function `(state, dispatch?) -> Bool` that, given the editor state, optionally

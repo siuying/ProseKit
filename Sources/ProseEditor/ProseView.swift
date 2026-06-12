@@ -379,6 +379,7 @@ import UIKit
     }
 
     public func insertText(_ text: String) {
+        NSLog("PROSE insertText '%@' sel=%d..%d", text, state.selection.anchor, state.selection.head)
         // Every newline behaves like typing Return: it splits the block.
         let segments = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         for (index, segment) in segments.enumerated() {
@@ -399,12 +400,15 @@ import UIKit
     }
 
     public func deleteBackward() {
+        NSLog("PROSE deleteBackward sel=%d..%d", state.selection.anchor, state.selection.head)
         if (try? Commands.joinBackward().run(in: &state)) == true {
+            NSLog("PROSE deleteBackward joined; sel now %d..%d", state.selection.anchor, state.selection.head)
             relayoutAndDisplayEdit()
             return
         }
         inputDelegate?.textWillChange(self)
         try? state.deleteBackward()
+        NSLog("PROSE deleteBackward plain; sel now %d..%d", state.selection.anchor, state.selection.head)
         relayoutAndDisplayEdit()
         inputDelegate?.textDidChange(self)
     }
@@ -413,6 +417,7 @@ import UIKit
         get { ProseTextRange(anchor: state.selection.anchor, head: state.selection.head) }
         set {
             guard let range = newValue as? ProseTextRange else { return }
+            NSLog("PROSE setSelectedTextRange %d..%d", range.anchor, range.head)
             inputDelegate?.selectionWillChange(self)
             state = EditorState(
                 document: state.document,
@@ -487,6 +492,7 @@ import UIKit
         guard let range = range as? ProseTextRange else { return }
         let from = min(range.anchor, range.head)
         let to = max(range.anchor, range.head)
+        NSLog("PROSE replace %d..%d with '%@' sel=%d..%d", from, to, text, state.selection.anchor, state.selection.head)
         inputDelegate?.textWillChange(self)
         try? state.dispatch(Transaction(
             steps: [ReplaceStep(from: from, to: to, insertText: text)],

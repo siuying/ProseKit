@@ -21,6 +21,56 @@ final class ProseExampleUITests: XCTestCase {
         return app.scrollViews.firstMatch
     }
 
+    @MainActor
+    private func attach(_ app: XCUIApplication, _ name: String) {
+        try? app.screenshot().pngRepresentation.write(to: URL(fileURLWithPath: "/tmp/prose-repro/\(name).png"))
+    }
+
+    // TEMP repro: selection highlight after heading toggle
+    @MainActor
+    func testReproHeadingToggleSelectionHighlight() throws {
+        let app = XCUIApplication()
+        app.launch()
+        app.staticTexts["Marks & Formatting"].tap()
+        let editor = editorElement(in: app)
+        XCTAssertTrue(editor.waitForExistence(timeout: 10))
+        sleep(1)
+        // Select a word in the first paragraph.
+        editor.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.2)).doubleTap()
+        sleep(1)
+        attach(app, "1-selected-before-toggle")
+        app.buttons["Heading"].tap()
+        sleep(1)
+        attach(app, "2-after-heading-toggle")
+    }
+
+    // TEMP repro: delete key behaviour in structural editing demo
+    @MainActor
+    func testReproDeleteKeyJoinsBlocks() throws {
+        let app = XCUIApplication()
+        app.launch()
+        app.staticTexts["Structural Editing"].tap()
+        let editor = editorElement(in: app)
+        XCTAssertTrue(editor.waitForExistence(timeout: 10))
+        editor.tap()
+        sleep(2)
+        // Select the first word of the second paragraph; its selection start
+        // is the block start, so two deletes exercise selection-delete and
+        // then the block join.
+        editor.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.165)).doubleTap()
+        sleep(1)
+        attach(app, "1-word-selected")
+        app.typeText(XCUIKeyboardKey.delete.rawValue)
+        sleep(1)
+        attach(app, "2-after-selection-delete")
+        app.typeText(XCUIKeyboardKey.delete.rawValue)
+        sleep(1)
+        attach(app, "3-after-join-delete")
+        app.typeText(XCUIKeyboardKey.delete.rawValue)
+        sleep(1)
+        attach(app, "4-after-third-delete")
+    }
+
     /// Without -paragraphs the app boots into the demo list; tapping a row
     /// must push a working full-screen editor.
     @MainActor
