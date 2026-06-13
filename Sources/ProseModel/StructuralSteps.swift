@@ -216,3 +216,101 @@ public struct SetTextAlignStep: Step, Codable, Equatable, Sendable {
         position
     }
 }
+
+/// Wraps the single block whose node range is `blockRange` into a new container
+/// of `containerType` (e.g. a paragraph into a blockquote). The block keeps its
+/// content; a container open/close token pair is added around it.
+public struct WrapInStep: Step, Codable, Equatable, Sendable {
+    public var blockRange: Range<Position>
+    public var containerType: String
+
+    public init(blockRange: Range<Position>, containerType: String) {
+        self.blockRange = blockRange
+        self.containerType = containerType
+    }
+
+    public func apply(to document: Document) throws -> StepApplication {
+        guard let info = document.blockInfo(containing: blockRange.lowerBound + 1),
+              info.start == blockRange.lowerBound else {
+            throw StepError.unsupportedReplacement("wrap requires the block at the given range")
+        }
+        let childIndex = info.path.last ?? info.index
+        let parentPath = Array(info.path.dropLast())
+        let wrapper = Node(type: containerType, content: [info.node])
+        return StepApplication(
+            document: document.replacingBlocks(at: parentPath, childRange: childIndex..<(childIndex + 1), with: [wrapper]),
+            changedRange: info.start..<(info.start + wrapper.nodeSize)
+        )
+    }
+
+    public func inverted(in document: Document) throws -> any Step {
+        // After wrapping, the block sits one Position deeper (past the new
+        // container's opening token); lifting it there restores the original.
+        LiftStep(blockRange: (blockRange.lowerBound + 1)..<(blockRange.upperBound + 1))
+    }
+
+    /// Wrap inserts the container's opening token before the block and its
+    /// closing token after it.
+    public func map(_ position: Position) -> Position {
+        if position <= blockRange.lowerBound { return position }
+        if position < blockRange.upperBound { return position + 1 }
+        return position + 2
+    }
+}
+
+/// Lifts the block whose node range is `blockRange` — which must be the first
+/// child of its container — out to the container's own parent, before the
+/// container. If it was the container's only child, the now-empty container is
+/// removed; otherwise the container keeps its remaining children.
+public struct LiftStep: Step, Codable, Equatable, Sendable {
+    public var blockRange: Range<Position>
+
+    public init(blockRange: Range<Position>) {
+        self.blockRange = blockRange
+    }
+
+    public func apply(to document: Document) throws -> StepApplication {
+        guard let info = document.blockInfo(containing: blockRange.lowerBound + 1),
+              info.start == blockRange.lowerBound,
+              (info.path.last ?? 0) == 0, info.path.count >= 2 else {
+            throw StepError.unsupportedReplacement("lift requires the first child of a container")
+        }
+        let containerPath = Array(info.path.dropLast())
+        let container = document.node(atPath: containerPath)
+        let grandparentPath = Array(containerPath.dropLast())
+        let containerIndex = containerPath.last ?? 0
+        let leaf = container.content[0]
+        let remaining = Array(container.content.dropFirst())
+        let replacement = remaining.isEmpty ? [leaf] : [leaf, container.withContent(remaining)]
+        let containerStart = info.start - 1
+        return StepApplication(
+            document: document.replacingBlocks(
+                at: grandparentPath,
+                childRange: containerIndex..<(containerIndex + 1),
+                with: replacement
+            ),
+            changedRange: containerStart..<(containerStart + container.nodeSize)
+        )
+    }
+
+    public func inverted(in document: Document) throws -> any Step {
+        guard let info = document.blockInfo(containing: blockRange.lowerBound + 1) else {
+            throw StepError.unsupportedReplacement("lift requires the first child of a container")
+        }
+        // The container we are lifting out of; re-wrapping into its type, at the
+        // block's lifted-up Position (one shallower), inverts the lift.
+        let containerType = document.node(atPath: Array(info.path.dropLast())).type
+        return WrapInStep(
+            blockRange: (blockRange.lowerBound - 1)..<(blockRange.upperBound - 1),
+            containerType: containerType
+        )
+    }
+
+    /// Lifting moves the block up one level, dropping the enclosing opening
+    /// token that preceded it.
+    public func map(_ position: Position) -> Position {
+        if position <= blockRange.lowerBound { return position }
+        if position < blockRange.upperBound { return position - 1 }
+        return position
+    }
+}

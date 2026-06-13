@@ -321,14 +321,17 @@ import UIKit
 
     public func deleteBackward() {
         do {
-            if try Commands.joinBackward().run(in: &state) {
+            // At a block's text start: join into the previous sibling, or — when
+            // it is the first child of a container — lift it out of the container.
+            if try Commands.joinBackward().run(in: &state)
+                || Commands.liftOutOfContainer().run(in: &state) {
                 relayoutAndDisplayEdit()
                 return
             }
         } catch {
-            // canJoinBackward gates the command, so a throw here is a real
-            // invariant break, not a boundary condition.
-            assertionFailure("joinBackward failed: \(error)")
+            // The commands gate themselves, so a throw here is a real invariant
+            // break, not a boundary condition.
+            assertionFailure("backspace structural command failed: \(error)")
         }
         performEdit { try state.deleteBackward() }
     }

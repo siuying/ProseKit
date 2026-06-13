@@ -14,9 +14,26 @@ public struct InputRule: Sendable {
 }
 
 public enum InputRules {
-    /// The StarterKit block rules available today. List / blockquote / codeBlock
-    /// / task rules join as those node types land (slices 10, 12, 14, 15).
-    public static let starterKit: [InputRule] = headingRules
+    /// The StarterKit block rules available today. List / codeBlock / task rules
+    /// join as those node types land (slices 12, 14, 15).
+    public static let starterKit: [InputRule] = headingRules + [blockquoteRule]
+
+    /// `> ` at a paragraph's start wraps it in a blockquote.
+    static let blockquoteRule = InputRule(trigger: "> ") { state, from, to in
+        guard let info = state.document.blockInfo(containing: from) else { return }
+        // After dropping the trigger the block shrinks by its length; wrap the
+        // shortened block. The caret lands one Position deeper (past the new
+        // blockquote's opening token).
+        let shortened = info.start..<(info.start + info.node.nodeSize - (to - from))
+        try state.dispatch(Transaction(
+            steps: [
+                ReplaceStep(from: from, to: to, insertText: ""),
+                WrapInStep(blockRange: shortened, containerType: "blockquote"),
+            ],
+            selection: TextSelection(anchor: from + 1, head: from + 1),
+            origin: .local
+        ))
+    }
 
     /// `#`…`######` + space → heading of that level (Q5).
     static let headingRules: [InputRule] = (1...6).map { level in
