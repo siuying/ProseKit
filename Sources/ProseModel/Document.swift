@@ -221,62 +221,12 @@ public struct Document: Codable, Hashable, Sendable {
         return BlockInfo(index: blockIndex, node: root.content[blockIndex], start: starts[blockIndex])
     }
 
-    /// Splits the text block containing `position` at it. The second block
-    /// inherits the first's type and Attrs unless `blockType`/`blockAttrs`
-    /// override it (how JoinBlocksStep inverts back to the original block).
-    public func splitBlock(
-        at position: Position,
-        blockType: String? = nil,
-        blockAttrs: [String: JSONValue]? = nil
-    ) throws -> StepApplication {
-        guard let info = blockInfo(containing: position),
-              info.node.type == "paragraph" || info.node.type == "heading" else {
-            throw StepError.unsupportedReplacement("splitBlock requires a text block")
-        }
-        let textStart = info.start + 1
-        let offset = max(0, min(info.node.plainText.count, position - textStart))
-        let text = info.node.plainText
-        let splitIndex = text.index(text.startIndex, offsetBy: offset)
-        let first = info.node.withContent([.text(String(text[..<splitIndex]))])
-        let second = blockType
-            .map { Node(type: $0, attrs: blockAttrs ?? [:], content: [.text(String(text[splitIndex...]))]) }
-            ?? info.node.withContent([.text(String(text[splitIndex...]))])
-        let newBlockStart = info.start + first.nodeSize
-        return StepApplication(
-            document: replacingBlocks(in: info.index..<(info.index + 1), with: [first, second]),
-            changedRange: info.start..<(newBlockStart + second.nodeSize)
-        )
-    }
-
     /// Whether `position` is the first text position of a non-first block —
-    /// the precondition for `joinBackward(at:)`.
+    /// the precondition for a backward join (see `JoinBlocksStep`). A query, so
+    /// it stays on Document; `Commands.joinBackward` gates on it.
     public func canJoinBackward(at position: Position) -> Bool {
         guard let info = blockInfo(containing: position) else { return false }
         return info.index > 0 && position == info.start + 1
-    }
-
-    public func joinBackward(at position: Position) -> StepApplication? {
-        guard let info = blockInfo(containing: position), info.index > 0, position == info.start + 1 else {
-            return nil
-        }
-        let previous = root.content[info.index - 1]
-        let current = root.content[info.index]
-        let previousTextEnd = info.start - 1
-
-        let joined: Document
-        if textCount(ofBlockAt: info.index) == 0 {
-            joined = replacingBlocks(in: info.index..<(info.index + 1), with: [])
-        } else {
-            // Concatenating the runs (not the plain text) keeps both blocks'
-            // Marks across the join, like ProseMirror.
-            let merged = previous.withContent(previous.content + current.content)
-            joined = replacingBlocks(in: (info.index - 1)..<(info.index + 1), with: [merged])
-        }
-
-        return StepApplication(
-            document: joined,
-            changedRange: previousTextEnd - previous.nodeSize + 1..<(previousTextEnd + current.nodeSize)
-        )
     }
 
     /// The Position of the first text character in the block containing
