@@ -25,6 +25,22 @@ final class InputRuleTests: XCTestCase {
         XCTAssertEqual(s.document.root.content[0].attrs["level"], .int(3))
     }
 
+    func testDashSpaceBecomesBulletList() throws {
+        var s = state("- ")
+        XCTAssertTrue(try InputRules.apply(InputRules.starterKit, to: &s))
+        XCTAssertEqual(s.document.root.content[0].type, "bulletList")
+        XCTAssertEqual(s.document.root.content[0].content.map(\.type), ["listItem"])
+        XCTAssertEqual(s.document.root.content[0].content[0].content.map(\.type), ["paragraph"])
+        XCTAssertEqual(s.document.root.content[0].plainText, "", "the trigger text is consumed")
+        XCTAssertEqual(s.selection, TextSelection(anchor: 4, head: 4))
+    }
+
+    func testStarSpaceBecomesBulletList() throws {
+        var s = state("* ")
+        XCTAssertTrue(try InputRules.apply(InputRules.starterKit, to: &s))
+        XCTAssertEqual(s.document.root.content[0].type, "bulletList")
+    }
+
     func testNonTriggerTextDoesNothing() throws {
         var s = state("#x ")
         XCTAssertFalse(try InputRules.apply(InputRules.starterKit, to: &s))

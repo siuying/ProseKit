@@ -18,6 +18,39 @@ final class CommandTests: XCTestCase {
         XCTAssertEqual(state.lastTransaction?.changedRange, 1..<10)
     }
 
+    func testSplitBlockInsideBulletListCreatesSiblingListItem() throws {
+        var state = EditorState(document: Document(.doc([
+            .bulletList([
+                .listItem([.paragraph([.text("ab")])]),
+                .listItem([.paragraph([.text("cd")])]),
+            ]),
+        ])), selection: TextSelection(anchor: 5, head: 5))
+
+        XCTAssertTrue(try Commands.splitBlock().run(in: &state))
+
+        let list = state.document.root.content[0]
+        XCTAssertEqual(list.content.map(\.plainText), ["a", "b", "cd"])
+        XCTAssertEqual(state.selection, TextSelection(anchor: 9, head: 9))
+    }
+
+    func testSplitBlockOnEmptyListItemExitsTheList() throws {
+        var state = EditorState(document: Document(.doc([
+            .bulletList([
+                .listItem([.paragraph([.text("ab")])]),
+                .listItem([.paragraph([])]),
+                .listItem([.paragraph([.text("cd")])]),
+            ]),
+        ])), selection: TextSelection(anchor: 10, head: 10))
+
+        XCTAssertTrue(try Commands.splitBlock().run(in: &state))
+
+        XCTAssertEqual(state.document.root.content.map(\.type), ["bulletList", "paragraph", "bulletList"])
+        XCTAssertEqual(state.document.root.content[0].plainText, "ab")
+        XCTAssertEqual(state.document.root.content[1].plainText, "")
+        XCTAssertEqual(state.document.root.content[2].plainText, "cd")
+        XCTAssertEqual(state.selection, TextSelection(anchor: 8, head: 8))
+    }
+
     func testBackspaceAtBlockStartJoinsWithPreviousBlock() throws {
         var state = EditorState(document: Document(.doc([
             .paragraph([.text("hello")]),
@@ -31,6 +64,22 @@ final class CommandTests: XCTestCase {
         XCTAssertEqual(state.selection, TextSelection(anchor: 7, head: 7))
         XCTAssertFalse(state.document.containsText("\n"))
         XCTAssertEqual(state.lastTransaction?.changedRange, 1..<14)
+    }
+
+    func testBackspaceAtListItemStartJoinsWithPreviousItem() throws {
+        var state = EditorState(document: Document(.doc([
+            .bulletList([
+                .listItem([.paragraph([.text("ab")])]),
+                .listItem([.paragraph([.text("cd")])]),
+            ]),
+        ])), selection: TextSelection(anchor: 10, head: 10))
+
+        XCTAssertTrue(try Commands.joinBackward().run(in: &state))
+
+        let list = state.document.root.content[0]
+        XCTAssertEqual(list.content.count, 1)
+        XCTAssertEqual(list.content[0].plainText, "abcd")
+        XCTAssertEqual(state.selection, TextSelection(anchor: 6, head: 6))
     }
 
     func testJoinBackwardPreservesMarksOfBothBlocks() throws {

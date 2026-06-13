@@ -60,15 +60,20 @@ final class BlockquoteCommandTests: XCTestCase {
         XCTAssertFalse(try Commands.liftOutOfContainer().run(in: &s))
     }
 
-    func testLiftCommandDoesNotLiftAListItemParagraph() throws {
-        // Lifting the paragraph out of its listItem would make it a direct child
-        // of the bulletList (schema-invalid); the command must decline.
+    func testLiftCommandLiftsFirstListItemOutOfList() throws {
         var s = EditorState(
             document: Document(.doc([
-                .bulletList([.listItem([.paragraph([.text("item")])])]),
+                .bulletList([
+                    .listItem([.paragraph([.text("item")])]),
+                    .listItem([.paragraph([.text("next")])]),
+                ]),
             ])),
             selection: TextSelection(anchor: 4, head: 4) // text start of the item's paragraph
         )
-        XCTAssertFalse(try Commands.liftOutOfContainer().run(in: &s))
+        XCTAssertTrue(try Commands.liftOutOfContainer().run(in: &s))
+        XCTAssertEqual(s.document.root.content.map(\.type), ["paragraph", "bulletList"])
+        XCTAssertEqual(s.document.root.content[0].plainText, "item")
+        XCTAssertEqual(s.document.root.content[1].content.map(\.plainText), ["next"])
+        XCTAssertEqual(s.selection, TextSelection(anchor: 2, head: 2))
     }
 }

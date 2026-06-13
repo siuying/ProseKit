@@ -16,7 +16,7 @@ public struct InputRule: Sendable {
 public enum InputRules {
     /// The StarterKit block rules available today. List / codeBlock / task rules
     /// join as those node types land (slices 12, 14, 15).
-    public static let starterKit: [InputRule] = headingRules + [blockquoteRule]
+    public static let starterKit: [InputRule] = headingRules + [blockquoteRule] + bulletListRules
 
     /// `> ` at a paragraph's start wraps it in a blockquote.
     static let blockquoteRule = InputRule(trigger: "> ") { state, from, to in
@@ -33,6 +33,22 @@ public enum InputRules {
             selection: TextSelection(anchor: from + 1, head: from + 1),
             origin: .local
         ))
+    }
+
+    /// `- ` / `* ` at a paragraph's start wraps it in a one-item bullet list.
+    static let bulletListRules: [InputRule] = ["- ", "* "].map { trigger in
+        InputRule(trigger: trigger) { state, from, to in
+            guard let info = state.document.blockInfo(containing: from) else { return }
+            let shortened = info.start..<(info.start + info.node.nodeSize - (to - from))
+            try state.dispatch(Transaction(
+                steps: [
+                    ReplaceStep(from: from, to: to, insertText: ""),
+                    WrapInListStep(blockRange: shortened, listType: "bulletList"),
+                ],
+                selection: TextSelection(anchor: from + 2, head: from + 2),
+                origin: .local
+            ))
+        }
     }
 
     /// `#`…`######` + space → heading of that level (Q5).
