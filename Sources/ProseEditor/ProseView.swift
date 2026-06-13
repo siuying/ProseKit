@@ -48,6 +48,11 @@ import UIKit
         addInteraction(textInteraction)
         let checkboxTap = UITapGestureRecognizer(target: self, action: #selector(taskCheckboxTapped(_:)))
         checkboxTap.cancelsTouchesInView = false
+        // Gated to checkbox hits only (see UIGestureRecognizerDelegate below).
+        // An ungated tap recognizer competes with UITextInteraction's own tap
+        // for direct touches and swallows tap-to-position-caret — pointer
+        // clicks route through a separate path, so they keep working.
+        checkboxTap.delegate = self
         addGestureRecognizer(checkboxTap)
         // Caret-follow is built in, so keyboard avoidance must be too —
         // otherwise revealing the caret can park it under the keyboard.
@@ -607,6 +612,30 @@ import UIKit
         }
         selectedTextRange = ProseTextRange(anchor: extending ? selection.anchor : head.position, head: head.position)
         scrollCaretToVisible()
+    }
+}
+
+// MARK: - Checkbox gesture gating
+
+extension ProseView: UIGestureRecognizerDelegate {
+    /// The checkbox tap only tracks a touch that actually lands on a task
+    /// checkbox. Everywhere else it declines the touch entirely, so it never
+    /// arbitrates against UITextInteraction's tap and direct-touch
+    /// caret positioning behaves like UITextView.
+    public func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldReceive touch: UITouch
+    ) -> Bool {
+        taskCheckboxPosition(at: touch.location(in: self)) != nil
+    }
+
+    /// Even on a checkbox, let the system's recognizers run alongside ours so
+    /// the gating above is the only thing the checkbox tap ever blocks.
+    public func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
+    ) -> Bool {
+        true
     }
 }
 #endif
