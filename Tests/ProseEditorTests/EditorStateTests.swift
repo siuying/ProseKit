@@ -63,6 +63,46 @@ final class EditorStateTests: XCTestCase {
         XCTAssertEqual(state.lastTransaction?.changedRange, 4..<5)
     }
 
+    func testDeleteBackwardAtDocumentStartIsANoOp() throws {
+        let document = Document(.doc([.paragraph([.text("hi")])]))
+        var state = EditorState(
+            document: document,
+            selection: TextSelection(anchor: document.startTextPosition, head: document.startTextPosition)
+        )
+
+        // Backspace at the very start of the document must be inert, never
+        // a thrown boundary error (it crashed debug builds as an assertion).
+        XCTAssertNoThrow(try state.deleteBackward())
+        XCTAssertEqual(state.document, document)
+        XCTAssertEqual(state.selection, TextSelection(anchor: 2, head: 2))
+    }
+
+    func testDeleteBackwardAtBlockTextStartIsANoOpWithoutJoinCommand() throws {
+        // The view runs joinBackward first; headless deleteBackward at a
+        // block's text start must no-op rather than throw.
+        let document = Document(.doc([
+            .paragraph([.text("hello")]),
+            .paragraph([.text("world")]),
+        ]))
+        var state = EditorState(document: document, selection: TextSelection(anchor: 9, head: 9))
+
+        XCTAssertNoThrow(try state.deleteBackward())
+        XCTAssertEqual(state.document, document)
+    }
+
+    func testInsertTextOverCrossBlockSelectionReplacesAndJoins() throws {
+        var state = EditorState(document: Document(.doc([
+            .paragraph([.text("hello")]),
+            .paragraph([.text("world")]),
+        ])), selection: TextSelection(anchor: 4, head: 11))
+
+        try state.insertText("X")
+
+        XCTAssertEqual(state.document.root.content.count, 1)
+        XCTAssertEqual(state.document.plainText, "heXrld")
+        XCTAssertEqual(state.selection, TextSelection(anchor: 5, head: 5))
+    }
+
     func testTypingMarksInsertSuppliesChangedRange() throws {
         var state = EditorState(document: Document(.doc([
             .paragraph([.text("hi")]),
@@ -126,8 +166,8 @@ final class EditorStateTests: XCTestCase {
         var store = IncrementalLayoutStore(schema: .slice1, width: 240)
         let initial = try store.layout(document)
 
-        let (updatedDocument, _, changedRange) = try document.splitBlock(at: 4)
-        let updated = try store.layout(updatedDocument, changedRange: changedRange)
+        let split = try document.splitBlock(at: 4)
+        let updated = try store.layout(split.document, changedRange: split.changedRange)
 
         XCTAssertEqual(updated.children.count, 4)
         XCTAssertEqual(updated.children[3].node.plainText, "gamma")

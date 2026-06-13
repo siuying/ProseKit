@@ -21,11 +21,16 @@ public enum InputRules {
     /// `#`…`######` + space → heading of that level (Q5).
     static let headingRules: [InputRule] = (1...6).map { level in
         InputRule(trigger: String(repeating: "#", count: level) + " ") { state, from, to in
-            // Drop the trigger text, then promote the (paragraph) block to a
-            // heading via the existing structural edit.
-            let removed = try state.document.replacingText(from: from, to: to, with: "")
-            let (document, selection, changedRange) = try removed.togglingHeading(at: from, level: level)
-            state.replaceDocument(document, selection: selection, changedRange: changedRange)
+            // One Transaction: drop the trigger text, then promote the
+            // (paragraph) block to a heading.
+            try state.dispatch(Transaction(
+                steps: [
+                    ReplaceStep(from: from, to: to, insertText: ""),
+                    SetBlockTypeStep(at: from, headingLevel: level),
+                ],
+                selection: TextSelection(anchor: from, head: from),
+                origin: .local
+            ))
         }
     }
 

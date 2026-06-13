@@ -79,6 +79,11 @@ public struct LayoutBox: Equatable, Sendable {
     }
 }
 
+/// The vertical gap stacked between consecutive Layout Boxes.
+let blockSpacing: CGFloat = 12
+
+/// One-shot layout: a fresh `IncrementalLayoutStore` with no previous layout
+/// to reuse. The single stacking loop lives in the store.
 public struct LayoutEngine: Sendable {
     public var schema: Schema
 
@@ -87,27 +92,8 @@ public struct LayoutEngine: Sendable {
     }
 
     public func layout(_ document: Document, width: CGFloat) throws -> LayoutBox {
-        try schema.validate(document)
-        var y: CGFloat = 0
-        let children = document.root.content.enumerated().map { index, block -> LayoutBox in
-            let box = typesetLeafBlock(
-                block,
-                width: width,
-                y: y,
-                positionRange: blockRange(at: index, in: document),
-                typesetID: index + 1
-            )
-            y = box.frame.maxY + 12
-            return box
-        }
-        let height = children.last.map(\.frame.maxY) ?? 0
-        return LayoutBox(
-            kind: .container,
-            node: document.root,
-            frame: CGRect(x: 0, y: 0, width: width, height: height),
-            children: children,
-            positionRange: 0..<(document.endPosition + 1)
-        )
+        var store = IncrementalLayoutStore(schema: schema, width: width)
+        return try store.layout(document)
     }
 }
 
@@ -171,7 +157,7 @@ public struct IncrementalLayoutStore: Sendable {
                     } else {
                         children.append(old.moved(toY: y, positionRange: range))
                     }
-                    y += old.frame.height + 12
+                    y += old.frame.height + blockSpacing
                     continue
                 }
             }
@@ -181,7 +167,7 @@ public struct IncrementalLayoutStore: Sendable {
                 try schema.validate(block: block)
             }
             let box = typesetLeafBlock(block, width: width, y: y, positionRange: range, typesetID: allocateTypesetID())
-            y = box.frame.maxY + 12
+            y = box.frame.maxY + blockSpacing
             children.append(box)
         }
 

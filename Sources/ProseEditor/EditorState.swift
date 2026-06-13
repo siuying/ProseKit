@@ -23,17 +23,10 @@ public struct EditorState: Sendable {
         let from = min(selection.anchor, selection.head)
         let to = max(selection.anchor, selection.head)
         let head = from + text.count
-        if !typingMarks.isEmpty, from == to {
-            let updated = try document.replacingText(from: from, to: to, with: text, marks: typingMarks)
-            replaceDocument(
-                updated,
-                selection: TextSelection(anchor: head, head: head),
-                changedRange: from..<max(from + text.count, from + 1)
-            )
-            return
-        }
+        // Pending typing Marks ride on the Step itself; they only apply at a
+        // collapsed caret (replacing a selection types plain).
         try dispatch(Transaction(
-            steps: [ReplaceStep(from: from, to: to, insertText: text)],
+            steps: [ReplaceStep(from: from, to: to, insertText: text, insertMarks: from == to ? typingMarks : [])],
             selection: TextSelection(anchor: head, head: head),
             origin: .local
         ))
@@ -44,7 +37,12 @@ public struct EditorState: Sendable {
             try insertText("")
             return
         }
-        guard selection.head > 0 else { return }
+        // At a block's text start there is no character to the left inside
+        // the block: joining with the previous block is a Command
+        // (joinBackward) the view runs first, and at the document start
+        // Backspace is inert. A designed no-op, not an error.
+        guard let textStart = document.blockTextStart(at: selection.head),
+              selection.head > textStart else { return }
         let head = selection.head - 1
         try dispatch(Transaction(
             steps: [ReplaceStep(from: head, to: selection.head, insertText: "")],
@@ -53,27 +51,13 @@ public struct EditorState: Sendable {
         ))
     }
 
+    /// The only mutation path: every edit is a Transaction of Steps, so the
+    /// Changed Range, Origin, and (future) history all flow from one seam.
     public mutating func dispatch(_ transaction: Transaction) throws {
         let applied = try transaction.apply(to: document)
         document = applied.document
         selection = applied.selection
         lastTransaction = applied
-    }
-
-    public mutating func replaceDocument(
-        _ document: Document,
-        selection: TextSelection,
-        origin: Origin = .local,
-        changedRange: Range<Position>
-    ) {
-        self.document = document
-        self.selection = selection
-        lastTransaction = AppliedTransaction(
-            document: document,
-            selection: selection,
-            origin: origin,
-            changedRange: changedRange
-        )
     }
 
     // MARK: - Active state (toolbar queries)

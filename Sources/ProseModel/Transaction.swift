@@ -5,11 +5,11 @@ public enum Origin: String, Codable, Equatable, Sendable {
 }
 
 public struct Transaction: Sendable {
-    public var steps: [ReplaceStep]
+    public var steps: [any Step]
     public var selection: TextSelection
     public var origin: Origin
 
-    public init(steps: [ReplaceStep], selection: TextSelection, origin: Origin) {
+    public init(steps: [any Step], selection: TextSelection, origin: Origin) {
         self.steps = steps
         self.selection = selection
         self.origin = origin

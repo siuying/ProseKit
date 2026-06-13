@@ -1,6 +1,5 @@
 #if canImport(UIKit)
 import CoreGraphics
-import CoreText
 import ProseModel
 import UIKit
 
@@ -24,15 +23,13 @@ import UIKit
     /// `UIPasteboard.general` is unavailable to unhosted test bundles.
     public var pasteboard: UIPasteboard = .general
 
-    private var state: EditorState
-    private var layoutStore: IncrementalLayoutStore
-    private var layoutBox: LayoutBox?
-    private let geometryMapper = GeometryMapper()
-    private lazy var proseTokenizer = UITextInputStringTokenizer(textInput: self)
-    /// The Canvas: a Viewport-sized paint surface repositioned on scroll
-    /// (ADR 0002). It holds no document or geometry authority; selection
-    /// chrome and hit-testing live on the scroll view, in content space.
-    private let canvas = CanvasView()
+    var state: EditorState
+    var layoutStore: IncrementalLayoutStore
+    var layoutBox: LayoutBox?
+    let geometryMapper = GeometryMapper()
+    lazy var proseTokenizer = UITextInputStringTokenizer(textInput: self)
+    /// The Canvas (ADR 0002); it owns all drawing — see CanvasView.
+    let canvas = CanvasView()
 
     public init(document: Document, schema: Schema = .slice1) {
         self.state = EditorState(document: document)
@@ -42,9 +39,6 @@ import UIKit
         canvas.isUserInteractionEnabled = false
         canvas.backgroundColor = .clear
         canvas.isOpaque = false
-        canvas.drawContent = { [weak self] rect, context in
-            self?.drawCanvas(rect, in: context)
-        }
         // Below the system selection chrome UITextInteraction installs.
         addSubview(canvas)
         // The system owns all selection chrome: caret, handles, loupe,
@@ -60,6 +54,11 @@ import UIKit
             name: UIResponder.keyboardWillChangeFrameNotification,
             object: nil
         )
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
     }
 
     @objc private func keyboardWillChangeFrame(_ notification: Notification) {
@@ -112,7 +111,10 @@ import UIKit
         }
     }
 
-    var hasSelectionDragHook: Bool {
+    /// Hooks the drag gestures and reports whether one was found — the test
+    /// seam pinning that the running OS still exposes the recognizer.
+    @discardableResult
+    func ensureSelectionDragHook() -> Bool {
         hookSelectionDragGestures()
         return !hookedDragGestures.isEmpty
     }
@@ -175,10 +177,7 @@ import UIKit
         autoscrollDisplayLink = nil
     }
 
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) is not supported")
-    }
+    // MARK: - Layout and repaint
 
     public override func layoutSubviews() {
         super.layoutSubviews()
@@ -199,52 +198,28 @@ import UIKit
         }
     }
 
-    /// Paints the Layout Boxes intersecting the dirty region. `rect` is
-    /// Canvas-local; blocks live in content space, offset by the Canvas's
-    /// origin (the contentOffset). Internal so the culling-equivalence
-    /// rendering test can drive it directly.
-    func drawCanvas(_ rect: CGRect, in context: CGContext) {
-        guard let layoutBox else { return }
-        let origin = canvas.frame.origin
-        // Outset for glyph overhang: descenders of a block ending just above
-        // the dirty region still paint into it.
-        let contentRect = rect
-            .offsetBy(dx: origin.x, dy: origin.y)
-            .insetBy(dx: 0, dy: -Self.glyphOverhang)
-        context.saveGState()
-        // CoreText draws in a bottom-left coordinate space; flip to UIKit's
-        // about the layout height, then shift content space into the Canvas.
-        let flipHeight = layoutBox.frame.height
-        context.textMatrix = .identity
-        context.translateBy(x: -origin.x, y: -origin.y)
-        context.translateBy(x: 0, y: flipHeight)
-        context.scaleBy(x: 1, y: -1)
-        context.setFillColor(UIColor.label.cgColor)
-        for box in layoutBox.children {
-            // Blocks are y-ordered; everything past the dirty rect is clean.
-            if box.frame.minY > contentRect.maxY { break }
-            guard box.frame.intersects(contentRect) else { continue }
-            draw(block: box, in: context, flippedAbout: flipHeight)
-        }
-        context.restoreGState()
-    }
-
     private func relayout(changedRange: Range<Position>? = nil) {
         guard bounds.width > 0 else { return }
         layoutStore.width = bounds.width
-        layoutBox = try? layoutStore.layout(state.document, changedRange: changedRange)
+        do {
+            layoutBox = try layoutStore.layout(state.document, changedRange: changedRange)
+        } catch is SchemaError {
+            // A host handed the editor a document outside the Schema —
+            // rejected input, not a broken invariant. Keep the previous
+            // layout (or stay blank before a first layout).
+        } catch {
+            assertionFailure("relayout failed: \(error)")
+        }
+        canvas.layoutBox = layoutBox
         contentSize = layoutBox?.frame.size ?? .zero
     }
 
     /// Relayouts for the last transaction and invalidates only the region
-    /// the edit can have moved: the changed blocks' frames, extended to the
-    /// document bottom when heights shift everything below. A wrong-too-big
-    /// rect costs a repaint; a wrong-too-small rect leaves stale pixels, so
-    /// every uncertain case falls back to the full bounds.
+    /// the edit can have moved (see CanvasView.editDirtyRect).
     private func relayoutAndDisplayEdit() {
         let previous = layoutBox
         relayout(changedRange: state.lastTransaction?.changedRange)
-        setCanvasNeedsDisplay(Self.editDirtyRect(
+        setCanvasNeedsDisplay(CanvasView.editDirtyRect(
             from: previous,
             to: layoutBox,
             changedRange: state.lastTransaction?.changedRange,
@@ -257,7 +232,7 @@ import UIKit
     /// Reveals the Selection's head after local edits and keyboard caret
     /// moves, like UITextView. Programmatic document or selection changes
     /// never scroll; hosts reveal explicitly via scrollRangeToVisible.
-    private func scrollCaretToVisible() {
+    func scrollCaretToVisible() {
         guard let layoutBox else { return }
         reveal(geometryMapper.caretRect(for: state.selection.head, in: layoutBox))
     }
@@ -289,140 +264,7 @@ import UIKit
         ))
     }
 
-    static func editDirtyRect(
-        from previous: LayoutBox?,
-        to current: LayoutBox?,
-        changedRange: Range<Position>?,
-        fallback: CGRect
-    ) -> CGRect {
-        guard let previous, let current, let changedRange else { return fallback }
-        // A collapsed range still names the edited spot (e.g. a no-op
-        // command); widen it so the containing block is found.
-        let range = changedRange.isEmpty
-            ? changedRange.lowerBound..<(changedRange.lowerBound + 1)
-            : changedRange
-        var dirty: CGRect = .null
-        for box in current.children {
-            if box.positionRange.lowerBound >= range.upperBound { break }
-            guard rangesIntersect(box.positionRange, range) else { continue }
-            dirty = dirty.union(box.frame)
-        }
-        guard !dirty.isNull else { return fallback }
-
-        // When total height or block count changes, every block below the
-        // edit moved; both the old and new extent must repaint.
-        if previous.frame.height != current.frame.height
-            || previous.children.count != current.children.count {
-            let bottom = max(previous.frame.maxY, current.frame.maxY)
-            dirty = CGRect(
-                x: 0, y: dirty.minY,
-                width: max(fallback.width, dirty.width),
-                height: bottom - dirty.minY
-            )
-        }
-        // Full-width strip (fragment frames can be narrower than the view),
-        // outset for glyph overhang at the strip edges.
-        return CGRect(
-            x: 0, y: dirty.minY,
-            width: max(fallback.width, dirty.width),
-            height: dirty.height
-        ).insetBy(dx: 0, dy: -glyphOverhang)
-    }
-
-    /// How far glyphs may paint outside their block's frame (descenders,
-    /// diacritics); dirty regions widen by this on both sides.
-    private static let glyphOverhang: CGFloat = 2
-
-    private func draw(block: LayoutBox, in context: CGContext, flippedAbout flipHeight: CGFloat) {
-        for fragment in block.lineFragments {
-            guard let typeset = fragment.typesetLine else { continue }
-            let baseline = block.frame.minY + fragment.frame.minY + typeset.ascent
-            let origin = CGPoint(
-                x: block.frame.minX + fragment.frame.minX,
-                y: flipHeight - baseline
-            )
-            drawHighlights(for: typeset.line, lineOrigin: origin, in: context)
-            context.textPosition = origin
-            CTLineDraw(typeset.line, context)
-            drawLinkTint(for: typeset.line, lineOrigin: origin, in: context)
-            drawStrikethrough(for: typeset.line, lineOrigin: origin, in: context)
-        }
-    }
-
-    /// Recolours link runs in the link tint after the line is drawn in the body
-    /// colour. Links don't carry an explicit CoreText foreground (that would leak
-    /// into the shared context fill that foreground-from-context runs read); the
-    /// tint is overpainted here, like highlight and strikethrough.
-    private func drawLinkTint(for line: CTLine, lineOrigin: CGPoint, in context: CGContext) {
-        let runs = CTLineGetGlyphRuns(line) as? [CTRun] ?? []
-        for run in runs {
-            let attributes = CTRunGetAttributes(run) as NSDictionary
-            guard attributes[BlockStyle.linkAttributeName] != nil else { continue }
-            context.saveGState()
-            context.setFillColor(BlockStyle.linkColor)
-            context.textPosition = lineOrigin
-            CTRunDraw(run, context, CFRange(location: 0, length: 0))
-            context.restoreGState()
-        }
-    }
-
-    /// Fills the background behind each run carrying a highlight colour, drawn
-    /// before the glyphs. The raw `color` value is parsed here (not at layout
-    /// time) so dark-mode palette colours resolve against the current traits;
-    /// an unparseable value draws nothing, the Mark surviving regardless.
-    private func drawHighlights(for line: CTLine, lineOrigin: CGPoint, in context: CGContext) {
-        let runs = CTLineGetGlyphRuns(line) as? [CTRun] ?? []
-        for run in runs {
-            let attributes = CTRunGetAttributes(run) as NSDictionary
-            guard let value = attributes[BlockStyle.highlightAttributeName] as? String,
-                  let color = HighlightColor.color(for: value) else { continue }
-            let stringRange = CTRunGetStringRange(run)
-            let startX = CTLineGetOffsetForStringIndex(line, stringRange.location, nil)
-            let endX = CTLineGetOffsetForStringIndex(line, stringRange.location + stringRange.length, nil)
-            var ascent: CGFloat = 0
-            var descent: CGFloat = 0
-            _ = CTRunGetTypographicBounds(run, CFRange(location: 0, length: 0), &ascent, &descent, nil)
-            let rect = CGRect(
-                x: lineOrigin.x + startX,
-                y: lineOrigin.y - descent,
-                width: endX - startX,
-                height: ascent + descent
-            )
-            context.saveGState()
-            context.setFillColor(color.cgColor)
-            context.fill(rect)
-            context.restoreGState()
-        }
-    }
-
-    /// CoreText draws underline but not strikethrough, so each run flagged by
-    /// `BlockStyle.strikethroughAttributeName` gets a manual stroke through the
-    /// x-height. Run geometry comes from the same CTLine the glyphs drew, so the
-    /// stroke stays exactly aligned with what was typeset.
-    private func drawStrikethrough(for line: CTLine, lineOrigin: CGPoint, in context: CGContext) {
-        let runs = CTLineGetGlyphRuns(line) as? [CTRun] ?? []
-        for run in runs {
-            let attributes = CTRunGetAttributes(run) as NSDictionary
-            guard attributes[BlockStyle.strikethroughAttributeName] != nil,
-                  let font = attributes[kCTFontAttributeName as String].map({ $0 as! CTFont }) else {
-                continue
-            }
-            let stringRange = CTRunGetStringRange(run)
-            let startX = CTLineGetOffsetForStringIndex(line, stringRange.location, nil)
-            let endX = CTLineGetOffsetForStringIndex(line, stringRange.location + stringRange.length, nil)
-            // A line through the middle of lowercase glyphs.
-            let y = lineOrigin.y + CTFontGetXHeight(font) / 2
-            let thickness = max(1, (CTFontGetSize(font) / 17).rounded())
-            context.saveGState()
-            // Match the glyph colour set in drawCanvas (foreground-from-context).
-            context.setStrokeColor(UIColor.label.cgColor)
-            context.setLineWidth(thickness)
-            context.move(to: CGPoint(x: lineOrigin.x + startX, y: y))
-            context.addLine(to: CGPoint(x: lineOrigin.x + endX, y: y))
-            context.strokePath()
-            context.restoreGState()
-        }
-    }
+    // MARK: - Focus
 
     public override var canBecomeFirstResponder: Bool { true }
 
@@ -454,12 +296,13 @@ import UIKit
         }
     }
 
+    // MARK: - Editing
+
     public var hasText: Bool {
         state.document.totalTextCount > 0
     }
 
     public func insertText(_ text: String) {
-        NSLog("PROSE insertText '%@' sel=%d..%d", text, state.selection.anchor, state.selection.head)
         // Every newline behaves like typing Return: it splits the block.
         let segments = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         for (index, segment) in segments.enumerated() {
@@ -473,352 +316,60 @@ import UIKit
     }
 
     private func insertPlainText(_ text: String) {
-        inputDelegate?.textWillChange(self)
-        try? state.insertText(text)
-        relayoutAndDisplayEdit()
-        inputDelegate?.textDidChange(self)
+        performEdit { try state.insertText(text) }
     }
 
     public func deleteBackward() {
-        NSLog("PROSE deleteBackward sel=%d..%d", state.selection.anchor, state.selection.head)
-        if (try? Commands.joinBackward().run(in: &state)) == true {
-            NSLog("PROSE deleteBackward joined; sel now %d..%d", state.selection.anchor, state.selection.head)
-            relayoutAndDisplayEdit()
-            return
+        do {
+            if try Commands.joinBackward().run(in: &state) {
+                relayoutAndDisplayEdit()
+                return
+            }
+        } catch {
+            // canJoinBackward gates the command, so a throw here is a real
+            // invariant break, not a boundary condition.
+            assertionFailure("joinBackward failed: \(error)")
         }
+        performEdit { try state.deleteBackward() }
+    }
+
+    /// Runs an edit between the input delegate's will/did notifications and
+    /// repaints the edited region. A StepError is an edit the model cannot
+    /// express yet (e.g. deleting a selection that spans blocks) — a designed
+    /// no-op. Any other throw means a model invariant broke, surfaced in
+    /// debug builds rather than silently swallowed.
+    private func performEdit(_ edit: () throws -> Void) {
         inputDelegate?.textWillChange(self)
-        try? state.deleteBackward()
-        NSLog("PROSE deleteBackward plain; sel now %d..%d", state.selection.anchor, state.selection.head)
+        do {
+            try edit()
+        } catch is StepError {
+            // Unsupported edit: leave the document untouched.
+        } catch {
+            assertionFailure("edit failed: \(error)")
+        }
         relayoutAndDisplayEdit()
         inputDelegate?.textDidChange(self)
     }
 
-    public var selectedTextRange: UITextRange? {
-        get { ProseTextRange(anchor: state.selection.anchor, head: state.selection.head) }
-        set {
-            guard let range = newValue as? ProseTextRange else { return }
-            NSLog("PROSE setSelectedTextRange %d..%d", range.anchor, range.head)
-            inputDelegate?.selectionWillChange(self)
-            state = EditorState(
-                document: state.document,
-                selection: range.textSelection,
-                lastTransaction: state.lastTransaction,
-                typingMarks: state.typingMarks
-            )
-            canvas.setNeedsDisplay()
-            inputDelegate?.selectionDidChange(self)
-            onStateChange?()
-        }
+    func runCommand(_ command: Command) {
+        // A command that didn't dispatch leaves a stale lastTransaction;
+        // its dirty rect repaints an already-clean region, never too little.
+        performEdit { _ = try command.run(in: &state) }
     }
 
-    public var markedTextRange: UITextRange? { nil }
-
-    public var beginningOfDocument: UITextPosition {
-        ProseTextPosition(2)
+    /// Clamps a Position to the Document's text range.
+    func clamp(_ position: Position) -> Position {
+        min(max(position, state.document.startTextPosition), state.document.endTextPosition)
     }
 
-    public var endOfDocument: UITextPosition {
-        ProseTextPosition(state.document.endTextPosition)
-    }
-
-    public var tokenizer: UITextInputTokenizer {
-        proseTokenizer
-    }
-
-    public func text(in range: UITextRange) -> String? {
-        guard let range = range as? ProseTextRange else { return nil }
-        return plainText(from: min(range.anchor, range.head), to: max(range.anchor, range.head))
-    }
-
-    /// Plain text between two positions; block boundaries read as "\n" so
-    /// ranges spanning blocks (Select All, tokenizer context) stay readable.
-    /// Materializes text only for blocks the range intersects — UIKit's
-    /// keyboard calls this around every keystroke.
-    private func plainText(from: Position, to: Position) -> String {
-        let document = state.document
-        var pieces: [String] = []
-        guard let firstIndex = firstBlockIndex(withTextEndAtOrAfter: from) else { return "" }
-        for index in firstIndex..<document.blockCount {
-            guard let textStart = document.position(ofTextInBlockAt: index),
-                  let count = document.textCount(ofBlockAt: index) else { continue }
-            guard to >= textStart else { break }
-            let text = document.root.content[index].plainText
-            let lower = max(from, textStart)
-            let upper = min(to, textStart + count)
-            let start = text.index(text.startIndex, offsetBy: lower - textStart)
-            let end = text.index(text.startIndex, offsetBy: upper - textStart)
-            pieces.append(String(text[start..<end]))
-        }
-        return pieces.joined(separator: "\n")
-    }
-
-    /// First block whose text end (textStart + count) is >= position;
-    /// binary search over the Document's block index.
-    private func firstBlockIndex(withTextEndAtOrAfter position: Position) -> Int? {
-        let document = state.document
-        let count = document.blockCount
-        guard count > 0 else { return nil }
-        var low = 0
-        var high = count - 1
-        while low < high {
-            let mid = (low + high) / 2
-            let textEnd = document.position(ofTextInBlockAt: mid)! + document.textCount(ofBlockAt: mid)!
-            if textEnd >= position { high = mid } else { low = mid + 1 }
-        }
-        let textEnd = document.position(ofTextInBlockAt: low)! + document.textCount(ofBlockAt: low)!
-        return textEnd >= position ? low : nil
-    }
-
-    public func replace(_ range: UITextRange, withText text: String) {
-        guard let range = range as? ProseTextRange else { return }
-        let from = min(range.anchor, range.head)
-        let to = max(range.anchor, range.head)
-        NSLog("PROSE replace %d..%d with '%@' sel=%d..%d", from, to, text, state.selection.anchor, state.selection.head)
-        inputDelegate?.textWillChange(self)
-        try? state.dispatch(Transaction(
-            steps: [ReplaceStep(from: from, to: to, insertText: text)],
-            selection: TextSelection(anchor: from + text.count, head: from + text.count),
-            origin: .local
-        ))
-        relayoutAndDisplayEdit()
-        inputDelegate?.textDidChange(self)
-    }
-
-    public func setMarkedText(_ markedText: String?, selectedRange: NSRange) {
-        if let markedText {
-            insertText(markedText)
-        }
-    }
-
-    public func unmarkText() {}
-
-    public func textRange(from fromPosition: UITextPosition, to toPosition: UITextPosition) -> UITextRange? {
-        guard let from = fromPosition as? ProseTextPosition, let to = toPosition as? ProseTextPosition else {
-            return nil
-        }
-        return ProseTextRange(anchor: from.position, head: to.position)
-    }
-
-    public func position(from position: UITextPosition, offset: Int) -> UITextPosition? {
-        guard let position = position as? ProseTextPosition else { return nil }
-        return ProseTextPosition(clamp(textPosition(position.position, movedByCharacterOffset: offset)))
-    }
-
-    public func position(from position: UITextPosition, in direction: UITextLayoutDirection, offset: Int) -> UITextPosition? {
-        guard let position = position as? ProseTextPosition, let layoutBox else { return nil }
-        var current = position.position
-        for _ in 0..<offset {
-            switch direction {
-            case .left: current = geometryMapper.position(before: current, in: layoutBox)
-            case .right: current = geometryMapper.position(after: current, in: layoutBox)
-            case .up: current = geometryMapper.position(above: current, in: layoutBox)
-            case .down: current = geometryMapper.position(below: current, in: layoutBox)
-            @unknown default: return nil
-            }
-        }
-        return ProseTextPosition(clamp(current))
-    }
-
-    public func compare(_ position: UITextPosition, to other: UITextPosition) -> ComparisonResult {
-        guard let lhs = position as? ProseTextPosition, let rhs = other as? ProseTextPosition else {
-            return .orderedSame
-        }
-        if lhs.position == rhs.position { return .orderedSame }
-        return lhs.position < rhs.position ? .orderedAscending : .orderedDescending
-    }
-
-    public func offset(from: UITextPosition, to toPosition: UITextPosition) -> Int {
-        guard let from = from as? ProseTextPosition, let to = toPosition as? ProseTextPosition else {
-            return 0
-        }
-        return characterOffset(of: to.position) - characterOffset(of: from.position)
-    }
-
-    /// Character offset into the "\n"-joined plain text for a document
-    /// position. A block boundary is two positions (close + open token) but
-    /// reads as one "\n", so position arithmetic and string arithmetic drift
-    /// apart by one per boundary; UITextInput offset math must stay in
-    /// character space to agree with text(in:). Inverse of
-    /// position(atCharacterOffset:).
-    private func characterOffset(of position: Position) -> Int {
-        let document = state.document
-        guard document.blockCount > 0 else { return 0 }
-        guard let index = firstBlockIndex(withTextEndAtOrAfter: position) else {
-            // Past every block: total characters plus one "\n" per boundary.
-            return document.totalTextCount + document.blockCount - 1
-        }
-        let textStart = document.position(ofTextInBlockAt: index)!
-        let charactersBefore = document.textCharacters(beforeBlockAt: index)! + index
-        return charactersBefore + max(0, position - textStart)
-    }
-
-    private func position(atCharacterOffset offset: Int) -> Position {
-        let document = state.document
-        let count = document.blockCount
-        guard count > 0 else { return document.endTextPosition }
-        // First block whose joined-character end (charStart + index + textCount)
-        // is >= offset; the "\n" before a block maps to the previous block's end.
-        var low = 0
-        var high = count - 1
-        while low < high {
-            let mid = (low + high) / 2
-            if characterEnd(ofBlockAt: mid, in: document) >= offset { high = mid } else { low = mid + 1 }
-        }
-        guard characterEnd(ofBlockAt: low, in: document) >= offset else {
-            return document.endTextPosition
-        }
-        let textStart = document.position(ofTextInBlockAt: low)!
-        let characterStart = document.textCharacters(beforeBlockAt: low)! + low
-        return textStart + max(0, offset - characterStart)
-    }
-
-    /// Offset just past the block's text in "\n"-joined character space.
-    private func characterEnd(ofBlockAt index: Int, in document: Document) -> Int {
-        document.textCharacters(beforeBlockAt: index)! + index + document.textCount(ofBlockAt: index)!
-    }
-
-    private func textPosition(_ position: Position, movedByCharacterOffset offset: Int) -> Position {
-        if offset == 0 { return position }
-        return offset > 0
-            ? textPosition(position, movedForwardByCharacterOffset: offset)
-            : textPosition(position, movedBackwardByCharacterOffset: -offset)
-    }
-
-    private func textPosition(_ position: Position, movedForwardByCharacterOffset offset: Int) -> Position {
-        var current = position
-        var remaining = offset
-
-        while remaining > 0 {
-            guard let info = state.document.blockInfo(containing: current) else {
-                return state.document.endTextPosition
-            }
-            let textStart = info.start + 1
-            let textEnd = textStart + info.node.plainText.count
-            let distanceInsideBlock = max(0, textEnd - current)
-            if remaining <= distanceInsideBlock {
-                return current + remaining
-            }
-            remaining -= distanceInsideBlock
-            guard state.document.root.content.indices.contains(info.index + 1),
-                  let nextTextStart = state.document.position(ofTextInBlockAt: info.index + 1) else {
-                return textEnd
-            }
-            remaining -= 1
-            current = nextTextStart
-        }
-
-        return current
-    }
-
-    private func textPosition(_ position: Position, movedBackwardByCharacterOffset offset: Int) -> Position {
-        var current = position
-        var remaining = offset
-
-        while remaining > 0 {
-            guard let info = state.document.blockInfo(containing: current) else {
-                return 2
-            }
-            let textStart = info.start + 1
-            let distanceInsideBlock = max(0, current - textStart)
-            if remaining <= distanceInsideBlock {
-                return current - remaining
-            }
-            remaining -= distanceInsideBlock
-            guard info.index > 0,
-                  let previousTextStart = state.document.position(ofTextInBlockAt: info.index - 1) else {
-                return textStart
-            }
-            remaining -= 1
-            let previous = state.document.root.content[info.index - 1]
-            current = previousTextStart + previous.plainText.count
-        }
-
-        return current
-    }
-
-    public func position(within range: UITextRange, farthestIn direction: UITextLayoutDirection) -> UITextPosition? {
-        direction == .left || direction == .up ? range.start : range.end
-    }
-
-    public func characterRange(byExtending position: UITextPosition, in direction: UITextLayoutDirection) -> UITextRange? {
-        guard let position = position as? ProseTextPosition,
-              let end = self.position(from: position, offset: direction == .left ? -1 : 1) as? ProseTextPosition else {
-            return nil
-        }
-        return ProseTextRange(anchor: position.position, head: end.position)
-    }
-
-    public func baseWritingDirection(for position: UITextPosition, in direction: UITextStorageDirection) -> NSWritingDirection {
-        .leftToRight
-    }
-
-    public func setBaseWritingDirection(_ writingDirection: NSWritingDirection, for range: UITextRange) {}
-
-    public func firstRect(for range: UITextRange) -> CGRect {
-        guard let range = range as? ProseTextRange else { return .zero }
-        guard let layoutBox,
-              let first = geometryMapper.selectionRects(for: range.textSelection, in: layoutBox).first else {
-            return caretRect(for: ProseTextPosition(min(range.anchor, range.head)))
-        }
-        return first
-    }
-
-    public func caretRect(for position: UITextPosition) -> CGRect {
-        guard let position = position as? ProseTextPosition, let layoutBox else { return .zero }
-        return geometryMapper.caretRect(for: position.position, in: layoutBox)
-    }
-
-    public func selectionRects(for range: UITextRange) -> [UITextSelectionRect] {
-        guard let range = range as? ProseTextRange, let layoutBox else { return [] }
-        let rects = geometryMapper.selectionRects(for: range.textSelection, in: layoutBox)
-        return rects.enumerated().map { index, rect in
-            ProseTextSelectionRect(
-                rect: rect,
-                containsStart: index == 0,
-                containsEnd: index == rects.count - 1
-            )
-        }
-    }
-
-    public func closestPosition(to point: CGPoint) -> UITextPosition? {
-        guard let layoutBox else {
-            return ProseTextPosition(state.selection.head)
-        }
-        return ProseTextPosition(clamp(geometryMapper.closestPosition(to: point, in: layoutBox)))
-    }
-
-    public func closestPosition(to point: CGPoint, within range: UITextRange) -> UITextPosition? {
-        closestPosition(to: point)
-    }
-
-    public func characterRange(at point: CGPoint) -> UITextRange? {
-        guard let position = closestPosition(to: point) as? ProseTextPosition else { return nil }
-        return ProseTextRange(anchor: position.position, head: clamp(position.position + 1))
-    }
+    // MARK: - Formatting commands (toolbar / key command surface)
 
     public func toggleHeading(level: Int = 1) {
         runCommand(Commands.toggleHeading(level: level))
     }
 
-    public func toggleCode() {
-        runCommand(Commands.toggleMark(.code))
-    }
-
-    public func toggleBold() {
-        runCommand(Commands.toggleMark(.bold))
-    }
-
-    public func toggleItalic() {
-        runCommand(Commands.toggleMark(.italic))
-    }
-
-    public func toggleStrike() { runCommand(Commands.toggleMark(Mark(type: "strike"))) }
-    public func toggleUnderline() { runCommand(Commands.toggleMark(Mark(type: "underline"))) }
-    public func toggleSuperscript() { runCommand(Commands.toggleMark(Mark(type: "superscript"))) }
-    public func toggleSubscript() { runCommand(Commands.toggleMark(Mark(type: "subscript"))) }
-
-    public func toggleHighlight(_ hex: String) {
-        runCommand(Commands.toggleMark(Mark(type: "highlight", attrs: ["color": .string(hex)])))
+    public func toggleMark(_ mark: Mark) {
+        runCommand(Commands.toggleMark(mark))
     }
 
     public func setLink(_ href: String) { runCommand(Commands.setLink(href: href)) }
@@ -835,6 +386,8 @@ import UIKit
     /// its active-state highlighting.
     public var onStateChange: (() -> Void)?
 
+    // MARK: - Input accessory
+
     private var customInputAccessoryView: UIView?
 
     /// A host-supplied accessory view (e.g. a formatting toolbar) shown above
@@ -846,6 +399,8 @@ import UIKit
         customInputAccessoryView = view
         if isFirstResponder { reloadInputViews() }
     }
+
+    // MARK: - Edit menu
 
     public override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
         switch action {
@@ -896,6 +451,8 @@ import UIKit
         selectedTextRange = ProseTextRange(anchor: begin.position, head: end.position)
     }
 
+    // MARK: - Hardware keyboard
+
     public override var keyCommands: [UIKeyCommand]? {
         let commands = [
             UIKeyCommand(input: "b", modifierFlags: .command, action: #selector(toggleBoldFromKeyCommand)),
@@ -910,11 +467,19 @@ import UIKit
     }
 
     public override func toggleBoldface(_ sender: Any?) {
-        runCommand(Commands.toggleMark(.bold))
+        toggleMark(.bold)
     }
 
     public override func toggleItalics(_ sender: Any?) {
-        runCommand(Commands.toggleMark(.italic))
+        toggleMark(.italic)
+    }
+
+    @objc private func toggleBoldFromKeyCommand() {
+        toggleMark(.bold)
+    }
+
+    @objc private func toggleItalicFromKeyCommand() {
+        toggleMark(.italic)
     }
 
     public override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
@@ -955,39 +520,6 @@ import UIKit
         }
         selectedTextRange = ProseTextRange(anchor: extending ? selection.anchor : head.position, head: head.position)
         scrollCaretToVisible()
-    }
-
-    private func clamp(_ position: Position) -> Position {
-        min(max(position, 2), state.document.endTextPosition)
-    }
-
-    private func runCommand(_ command: Command) {
-        inputDelegate?.textWillChange(self)
-        _ = try? command.run(in: &state)
-        // A command that didn't dispatch leaves a stale lastTransaction;
-        // its dirty rect repaints an already-clean region, never too little.
-        relayoutAndDisplayEdit()
-        inputDelegate?.textDidChange(self)
-    }
-
-    @objc private func toggleBoldFromKeyCommand() {
-        toggleBold()
-    }
-
-    @objc private func toggleItalicFromKeyCommand() {
-        toggleItalic()
-    }
-
-}
-
-/// The Canvas's view: a dumb paint surface. All drawing logic stays in
-/// ProseView; the Canvas only forwards its dirty rects.
-@MainActor private final class CanvasView: UIView {
-    var drawContent: ((CGRect, CGContext) -> Void)?
-
-    override func draw(_ rect: CGRect) {
-        guard let context = UIGraphicsGetCurrentContext() else { return }
-        drawContent?(rect, context)
     }
 }
 #endif

@@ -186,7 +186,7 @@ final class RenderingTests: XCTestCase {
                 context.cgContext.clip(to: rect)
                 // The Canvas's draw path; at contentOffset zero its local
                 // space coincides with content space.
-                view.drawCanvas(rect, in: context.cgContext)
+                view.canvas.drawCanvas(rect, in: context.cgContext)
                 context.cgContext.restoreGState()
             }
             return image.cgImage
@@ -241,7 +241,7 @@ final class RenderingTests: XCTestCase {
         }
         XCTAssertEqual(previous.frame.height, current.frame.height, "fixture edit must not reflow")
 
-        let dirty = ProseView.editDirtyRect(
+        let dirty = CanvasView.editDirtyRect(
             from: previous, to: current, changedRange: changedRange, fallback: bounds
         )
         let editedBlock = current.children[1].frame
@@ -255,10 +255,10 @@ final class RenderingTests: XCTestCase {
         let bounds = CGRect(origin: .zero, size: Self.size)
         guard let textStart = document.position(ofTextInBlockAt: 1) else { return XCTFail("fixture") }
         let (previous, current, changedRange) = try layoutPair(document) { state in
-            let (split, selection, range) = try state.document.splitBlock(at: textStart + 5)
-            state.replaceDocument(split, selection: selection, changedRange: range)
+            state = EditorState(document: state.document, selection: TextSelection(anchor: textStart + 5, head: textStart + 5))
+            _ = try Commands.splitBlock().run(in: &state)
         }
-        let dirty = ProseView.editDirtyRect(
+        let dirty = CanvasView.editDirtyRect(
             from: previous, to: current, changedRange: changedRange, fallback: bounds
         )
         let editedBlockTop = current.children[1].frame.minY
@@ -274,7 +274,7 @@ final class RenderingTests: XCTestCase {
     func testDirtyRectWithoutChangedRangeFallsBackToFullBounds() {
         let bounds = CGRect(origin: .zero, size: Self.size)
         XCTAssertEqual(
-            ProseView.editDirtyRect(from: nil, to: nil, changedRange: nil, fallback: bounds),
+            CanvasView.editDirtyRect(from: nil, to: nil, changedRange: nil, fallback: bounds),
             bounds
         )
     }

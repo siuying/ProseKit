@@ -1,7 +1,7 @@
 public struct Mapping: Sendable {
-    public var steps: [ReplaceStep]
+    public var steps: [any Step]
 
-    public init(_ steps: [ReplaceStep] = []) {
+    public init(_ steps: [any Step] = []) {
         self.steps = steps
     }
 

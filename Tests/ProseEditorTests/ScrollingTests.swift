@@ -291,7 +291,7 @@ final class ScrollingTests: XCTestCase {
         window.addSubview(view)
         window.isHidden = false
         XCTAssertTrue(
-            view.hasSelectionDragHook,
+            view.ensureSelectionDragHook(),
             "no range-adjustment gesture found on this OS; selection-drag edge autoscroll has no driver"
         )
     }

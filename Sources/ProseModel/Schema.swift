@@ -16,20 +16,20 @@ public struct Schema: Sendable {
     )
 
     public func validate(_ document: Document) throws {
-        try validate(document.root, parent: nil)
         guard document.root.type == "doc" else {
             throw SchemaError.invalidDocument("root node must be doc")
         }
+        try validate(document.root)
     }
 
     /// Validates a single block subtree. Incremental relayout validates only
     /// the blocks an edit touched; re-validating the whole document would put
     /// an O(document) walk back on every keystroke.
     public func validate(block: Node) throws {
-        try validate(block, parent: nil)
+        try validate(block)
     }
 
-    private func validate(_ node: Node, parent: Node?) throws {
+    private func validate(_ node: Node) throws {
         guard nodes.contains(node.type) else {
             throw SchemaError.invalidDocument("unknown node type \(node.type)")
         }
@@ -51,7 +51,7 @@ public struct Schema: Sendable {
         try NodeRules.rule(for: node.type)?.validate(node)
 
         for child in node.content {
-            try validate(child, parent: node)
+            try validate(child)
         }
     }
 }

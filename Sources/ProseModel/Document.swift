@@ -6,7 +6,7 @@ public struct Document: Codable, Hashable, Sendable {
     /// so the index cannot go stale, and the paths UIKit hammers between
     /// keystrokes (text(in:), offset math, blockInfo) stay O(log blocks)
     /// instead of re-walking the tree per call.
-    private struct BlockIndex: Hashable, Sendable {
+    struct BlockIndex: Hashable, Sendable {
         /// blockStarts[i] is the Position of block i's opening token.
         var blockStarts: [Position]
         /// blockTextCounts[i] is block i's plainText character count.
@@ -18,7 +18,7 @@ public struct Document: Codable, Hashable, Sendable {
         var endTextPosition: Position
     }
 
-    private var index: BlockIndex
+    var index: BlockIndex
 
     public init(_ root: Node) {
         self.root = root
@@ -217,7 +217,14 @@ public struct Document: Codable, Hashable, Sendable {
         return BlockInfo(index: blockIndex, node: root.content[blockIndex], start: starts[blockIndex])
     }
 
-    public func splitBlock(at position: Position) throws -> (Document, TextSelection, Range<Position>) {
+    /// Splits the text block containing `position` at it. The second block
+    /// inherits the first's type and Attrs unless `blockType`/`blockAttrs`
+    /// override it (how JoinBlocksStep inverts back to the original block).
+    public func splitBlock(
+        at position: Position,
+        blockType: String? = nil,
+        blockAttrs: [String: JSONValue]? = nil
+    ) throws -> StepApplication {
         guard let info = blockInfo(containing: position),
               info.node.type == "paragraph" || info.node.type == "heading" else {
             throw StepError.unsupportedReplacement("splitBlock requires a text block")
@@ -226,20 +233,25 @@ public struct Document: Codable, Hashable, Sendable {
         let offset = max(0, min(info.node.plainText.count, position - textStart))
         let text = info.node.plainText
         let splitIndex = text.index(text.startIndex, offsetBy: offset)
-        let before = String(text[..<splitIndex])
-        let after = String(text[splitIndex...])
-        let first = info.node.withContent([.text(before)])
-        let second = info.node.withContent([.text(after)])
+        let first = info.node.withContent([.text(String(text[..<splitIndex]))])
+        let second = blockType
+            .map { Node(type: $0, attrs: blockAttrs ?? [:], content: [.text(String(text[splitIndex...]))]) }
+            ?? info.node.withContent([.text(String(text[splitIndex...]))])
         let newBlockStart = info.start + first.nodeSize
-        let changedRange = info.start..<(newBlockStart + second.nodeSize)
-        return (
-            replacingBlocks(in: info.index..<(info.index + 1), with: [first, second]),
-            TextSelection(anchor: newBlockStart + 1, head: newBlockStart + 1),
-            changedRange
+        return StepApplication(
+            document: replacingBlocks(in: info.index..<(info.index + 1), with: [first, second]),
+            changedRange: info.start..<(newBlockStart + second.nodeSize)
         )
     }
 
-    public func joinBackward(at position: Position) throws -> (Document, TextSelection, Range<Position>)? {
+    /// Whether `position` is the first text position of a non-first block —
+    /// the precondition for `joinBackward(at:)`.
+    public func canJoinBackward(at position: Position) -> Bool {
+        guard let info = blockInfo(containing: position) else { return false }
+        return info.index > 0 && position == info.start + 1
+    }
+
+    public func joinBackward(at position: Position) -> StepApplication? {
         guard let info = blockInfo(containing: position), info.index > 0, position == info.start + 1 else {
             return nil
         }
@@ -251,49 +263,36 @@ public struct Document: Codable, Hashable, Sendable {
         if textCount(ofBlockAt: info.index) == 0 {
             joined = replacingBlocks(in: info.index..<(info.index + 1), with: [])
         } else {
-            let merged = previous.withContent([.text(previous.plainText + current.plainText)])
+            // Concatenating the runs (not the plain text) keeps both blocks'
+            // Marks across the join, like ProseMirror.
+            let merged = previous.withContent(previous.content + current.content)
             joined = replacingBlocks(in: (info.index - 1)..<(info.index + 1), with: [merged])
         }
 
-        return (
-            joined,
-            TextSelection(anchor: previousTextEnd, head: previousTextEnd),
-            previousTextEnd - previous.nodeSize + 1..<(previousTextEnd + current.nodeSize)
+        return StepApplication(
+            document: joined,
+            changedRange: previousTextEnd - previous.nodeSize + 1..<(previousTextEnd + current.nodeSize)
         )
     }
 
-    public func togglingHeading(at position: Position, level: Int) throws -> (Document, TextSelection, Range<Position>) {
-        guard let info = blockInfo(containing: position) else {
-            throw StepError.unsupportedReplacement("toggleHeading requires a text block")
-        }
-        let toggled = info.node.type == "heading" ? info.node.asParagraph() : info.node.asHeading(level: level)
-        return (
-            replacingBlocks(in: info.index..<(info.index + 1), with: [toggled]),
-            TextSelection(anchor: position, head: position),
-            info.start..<(info.start + toggled.nodeSize)
-        )
-    }
-
-    /// Sets the block at `position` to a specific type — a heading of `level`,
-    /// or a paragraph when `level` is nil — without toggling. Unlike
-    /// `togglingHeading`, choosing a different heading level changes the level
-    /// rather than reverting to a paragraph (what a heading dropdown needs).
-    public func settingBlockType(at position: Position, headingLevel level: Int?) throws -> (Document, TextSelection, Range<Position>) {
+    /// Sets the block at `position` to a heading of `level`, or a paragraph
+    /// when `level` is nil. Toggling (heading back to paragraph) is a Command
+    /// decision layered on top; the Document only sets.
+    public func settingBlockType(at position: Position, headingLevel level: Int?) throws -> StepApplication {
         guard let info = blockInfo(containing: position) else {
             throw StepError.unsupportedReplacement("setBlockType requires a text block")
         }
         let updated = level.map(info.node.asHeading(level:)) ?? info.node.asParagraph()
-        return (
-            replacingBlocks(in: info.index..<(info.index + 1), with: [updated]),
-            TextSelection(anchor: position, head: position),
-            info.start..<(info.start + updated.nodeSize)
+        return StepApplication(
+            document: replacingBlocks(in: info.index..<(info.index + 1), with: [updated]),
+            changedRange: info.start..<(info.start + updated.nodeSize)
         )
     }
 
     /// Sets (or clears) the `textAlign` Attr on the block at `position`.
     /// Only paragraph and heading carry it (Q9.2); `nil` or `"left"` clears it,
     /// keeping the absent-means-left default rather than storing a redundant Attr.
-    public func settingTextAlign(at position: Position, to value: String?) throws -> (Document, TextSelection, Range<Position>) {
+    public func settingTextAlign(at position: Position, to value: String?) throws -> StepApplication {
         guard let info = blockInfo(containing: position),
               info.node.type == "paragraph" || info.node.type == "heading" else {
             throw StepError.unsupportedReplacement("textAlign applies to paragraph and heading")
@@ -304,10 +303,9 @@ public struct Document: Codable, Hashable, Sendable {
         } else {
             updated.attrs["textAlign"] = nil
         }
-        return (
-            replacingBlocks(in: info.index..<(info.index + 1), with: [updated]),
-            TextSelection(anchor: position, head: position),
-            info.start..<(info.start + updated.nodeSize)
+        return StepApplication(
+            document: replacingBlocks(in: info.index..<(info.index + 1), with: [updated]),
+            changedRange: info.start..<(info.start + updated.nodeSize)
         )
     }
 
@@ -329,14 +327,16 @@ public struct Document: Codable, Hashable, Sendable {
 
     public func replacingText(from: Position, to: Position, with insertedText: String, marks: [Mark] = []) throws -> Document {
         guard let range = textRange(from: from, to: to) else {
-            throw StepError.unsupportedReplacement("replacement range must stay inside one text node")
+            // The range crosses a run or block boundary; merge across it.
+            return try replacingAcrossRuns(from: from, to: to, with: insertedText, marks: marks)
         }
         if !marks.isEmpty, from == to, range.path.count == 2 {
+            let offset = range.text.distance(from: range.text.startIndex, to: range.range.lowerBound)
             return replacing(
-                root: root.replacingTextNodeWithMarkedInsertion(
+                root: root.splicingTextNode(
                     atPath: range.path,
-                    offset: range.text.distance(from: range.text.startIndex, to: range.range.lowerBound),
-                    insertedText: insertedText,
+                    replacing: offset..<offset,
+                    withText: insertedText,
                     marks: marks
                 ),
                 blockAt: range.path[0]
@@ -347,6 +347,26 @@ public struct Document: Codable, Hashable, Sendable {
         let newRoot = root.replacingTextNode(atPath: range.path, with: updated)
         guard range.path.count == 2 else { return Document(newRoot) }
         return replacing(root: newRoot, blockAt: range.path[0])
+    }
+
+    /// Replacement whose range crosses a text-run or block boundary: the
+    /// blocks at the ends merge into one block of the first's type, keeping
+    /// the runs outside the range — ProseMirror's replace semantics. This is
+    /// what Backspace at a block start becomes when the keyboard deletes the
+    /// boundary "\n" in character space, and what typing over a selection
+    /// spanning blocks does.
+    private func replacingAcrossRuns(from: Position, to: Position, with insertedText: String, marks: [Mark]) throws -> Document {
+        guard from <= to,
+              let fromInfo = blockInfo(containing: from),
+              let toInfo = blockInfo(containing: to),
+              fromInfo.index <= toInfo.index else {
+            throw StepError.unsupportedReplacement("replacement range must lie within the document's text")
+        }
+        let head = fromInfo.node.inlineRuns(upTo: from - (fromInfo.start + 1))
+        let tail = toInfo.node.inlineRuns(from: to - (toInfo.start + 1))
+        let inserted: [Node] = insertedText.isEmpty ? [] : [.text(insertedText, marks: marks)]
+        let merged = fromInfo.node.withContent(head + inserted + tail)
+        return replacingBlocks(in: fromInfo.index..<(toInfo.index + 1), with: [merged])
     }
 
     public func addingMark(from: Position, to: Position, mark: Mark) throws -> Document {
@@ -366,12 +386,17 @@ public struct Document: Codable, Hashable, Sendable {
         guard let range = textRange(from: from, to: to) else {
             throw StepError.unsupportedReplacement("mark range must stay inside one text node")
         }
-        let newRoot = root.settingMark(
+        let existing = root.textNode(atPath: range.path)?.marks ?? []
+        let updated = enabled
+            ? MarkRules.adding(mark, to: existing)
+            : existing.filter { $0 != mark }
+        let lower = range.text.distance(from: range.text.startIndex, to: range.range.lowerBound)
+        let upper = range.text.distance(from: range.text.startIndex, to: range.range.upperBound)
+        let newRoot = root.splicingTextNode(
             atPath: range.path,
-            lowerOffset: range.text.distance(from: range.text.startIndex, to: range.range.lowerBound),
-            upperOffset: range.text.distance(from: range.text.startIndex, to: range.range.upperBound),
-            mark: mark,
-            enabled: enabled
+            replacing: lower..<upper,
+            withText: String(range.text[range.range]),
+            marks: updated
         )
         guard range.path.count == 2 else { return Document(newRoot) }
         return replacing(root: newRoot, blockAt: range.path[0])
@@ -441,22 +466,27 @@ private extension Node {
         return copy
     }
 
-    func replacingTextNodeWithMarkedInsertion(atPath path: [Int], offset: Int, insertedText: String, marks: [Mark]) -> Node {
+    /// Replaces `range` (character offsets) of the text node at `path` with a
+    /// run of `middle` carrying `middleMarks`, keeping the surrounding text in
+    /// runs that retain the original Marks. Empty runs are dropped. The one
+    /// splice behind both marked insertion and mark add/remove.
+    func splicingTextNode(atPath path: [Int], replacing range: Range<Int>, withText middle: String, marks middleMarks: [Mark]) -> Node {
         guard path.count == 2 else { return self }
         var copy = self
         let blockIndex = path[0]
         let textIndex = path[1]
         let original = copy.content[blockIndex].content[textIndex]
         let text = original.text ?? ""
-        let split = text.index(text.startIndex, offsetBy: offset)
+        let lower = text.index(text.startIndex, offsetBy: range.lowerBound)
+        let upper = text.index(text.startIndex, offsetBy: range.upperBound)
         var replacement: [Node] = []
-        let before = String(text[..<split])
-        let after = String(text[split...])
+        let before = String(text[..<lower])
+        let after = String(text[upper...])
         if !before.isEmpty {
             replacement.append(.text(before, marks: original.marks))
         }
-        if !insertedText.isEmpty {
-            replacement.append(.text(insertedText, marks: marks))
+        if !middle.isEmpty {
+            replacement.append(.text(middle, marks: middleMarks))
         }
         if !after.isEmpty {
             replacement.append(.text(after, marks: original.marks))
@@ -465,38 +495,48 @@ private extension Node {
         return copy
     }
 
-    func settingMark(atPath path: [Int], lowerOffset: Int, upperOffset: Int, mark: Mark, enabled: Bool) -> Node {
-        guard path.count == 2 else { return self }
-        var copy = self
-        let blockIndex = path[0]
-        let textIndex = path[1]
-        let original = copy.content[blockIndex].content[textIndex]
-        let text = original.text ?? ""
-        let lower = text.index(text.startIndex, offsetBy: lowerOffset)
-        let upper = text.index(text.startIndex, offsetBy: upperOffset)
-        var replacement: [Node] = []
-
-        func marks(_ existing: [Mark]) -> [Mark] {
-            if enabled {
-                return MarkRules.adding(mark, to: existing)
+    /// The text runs covering the block's first `offset` characters, Marks
+    /// preserved; the run straddling the cut is split.
+    func inlineRuns(upTo offset: Int) -> [Node] {
+        var runs: [Node] = []
+        var remaining = max(0, min(plainText.count, offset))
+        for child in content where child.isText {
+            guard remaining > 0 else { break }
+            let text = child.text ?? ""
+            if text.count <= remaining {
+                if !text.isEmpty {
+                    runs.append(child)
+                }
+                remaining -= text.count
+            } else {
+                let cut = text.index(text.startIndex, offsetBy: remaining)
+                runs.append(.text(String(text[..<cut]), marks: child.marks))
+                remaining = 0
             }
-            return existing.filter { $0 != mark }
         }
+        return runs
+    }
 
-        let before = String(text[..<lower])
-        let marked = String(text[lower..<upper])
-        let after = String(text[upper...])
-        if !before.isEmpty {
-            replacement.append(.text(before, marks: original.marks))
+    /// The text runs from the block's character `offset` to its end, Marks
+    /// preserved; the run straddling the cut is split.
+    func inlineRuns(from offset: Int) -> [Node] {
+        var runs: [Node] = []
+        var remaining = max(0, min(plainText.count, offset))
+        for child in content where child.isText {
+            let text = child.text ?? ""
+            if remaining >= text.count {
+                remaining -= text.count
+                continue
+            }
+            if remaining > 0 {
+                let cut = text.index(text.startIndex, offsetBy: remaining)
+                runs.append(.text(String(text[cut...]), marks: child.marks))
+                remaining = 0
+            } else if !text.isEmpty {
+                runs.append(child)
+            }
         }
-        if !marked.isEmpty {
-            replacement.append(.text(marked, marks: marks(original.marks)))
-        }
-        if !after.isEmpty {
-            replacement.append(.text(after, marks: original.marks))
-        }
-        copy.content[blockIndex].content.replaceSubrange(textIndex...textIndex, with: replacement)
-        return copy
+        return runs
     }
 
     func textNode(atPath path: [Int]) -> Node? {

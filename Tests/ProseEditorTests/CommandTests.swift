@@ -33,6 +33,20 @@ final class CommandTests: XCTestCase {
         XCTAssertEqual(state.lastTransaction?.changedRange, 1..<14)
     }
 
+    func testJoinBackwardPreservesMarksOfBothBlocks() throws {
+        var state = EditorState(document: Document(.doc([
+            .paragraph([.text("a", marks: [.bold])]),
+            .paragraph([.text("b", marks: [.italic])]),
+        ])), selection: TextSelection(anchor: 5, head: 5))
+
+        XCTAssertTrue(try Commands.joinBackward().run(in: &state))
+
+        let runs = state.document.root.content[0].content
+        XCTAssertEqual(runs.map(\.text), ["a", "b"])
+        XCTAssertEqual(runs[0].marks, [.bold])
+        XCTAssertEqual(runs[1].marks, [.italic])
+    }
+
     func testBackspaceInEmptyBlockRemovesIt() throws {
         var state = EditorState(document: Document(.doc([
             .paragraph([.text("hello")]),
