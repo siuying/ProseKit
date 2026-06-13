@@ -29,7 +29,7 @@ final class MarkExclusionTests: XCTestCase {
 
     func testDocumentAddingCodeOverBoldLeavesCodeOnly() throws {
         let document = Document(.doc([.paragraph([.text("hello", marks: [.bold])])]))
-        let result = try document.addingMark(from: 2, to: 7, mark: .code)
+        let result = try AddMarkStep(from: 2, to: 7, mark: .code).apply(to: document).document
         XCTAssertEqual(result.root.content[0].content[0].marks, [.code])
     }
 }

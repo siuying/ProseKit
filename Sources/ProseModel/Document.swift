@@ -289,37 +289,11 @@ public struct Document: Codable, Hashable, Sendable {
         return replacingBlocks(in: fromInfo.index..<(toInfo.index + 1), with: [merged])
     }
 
-    public func addingMark(from: Position, to: Position, mark: Mark) throws -> Document {
-        try settingMark(from: from, to: to, mark: mark, enabled: true)
-    }
-
-    public func removingMark(from: Position, to: Position, mark: Mark) throws -> Document {
-        try settingMark(from: from, to: to, mark: mark, enabled: false)
-    }
-
+    /// Whether the whole `from..<to` range carries `mark`. A query (toolbar
+    /// active-state, toggle decisions), so it stays on Document.
     public func rangeHasMark(from: Position, to: Position, mark: Mark) -> Bool {
         guard let range = textRange(from: from, to: to) else { return false }
         return root.textNode(atPath: range.path)?.marks.contains(mark) == true
-    }
-
-    private func settingMark(from: Position, to: Position, mark: Mark, enabled: Bool) throws -> Document {
-        guard let range = textRange(from: from, to: to) else {
-            throw StepError.unsupportedReplacement("mark range must stay inside one text node")
-        }
-        let existing = root.textNode(atPath: range.path)?.marks ?? []
-        let updated = enabled
-            ? MarkRules.adding(mark, to: existing)
-            : existing.filter { $0 != mark }
-        let lower = range.text.distance(from: range.text.startIndex, to: range.range.lowerBound)
-        let upper = range.text.distance(from: range.text.startIndex, to: range.range.upperBound)
-        let newRoot = root.splicingTextNode(
-            atPath: range.path,
-            replacing: lower..<upper,
-            withText: String(range.text[range.range]),
-            marks: updated
-        )
-        guard range.path.count == 2 else { return Document(newRoot) }
-        return replacing(root: newRoot, blockAt: range.path[0])
     }
 
     /// Locates the text node containing `from...to`: binary search for the
@@ -367,108 +341,3 @@ public struct BlockInfo: Equatable, Sendable {
     }
 }
 
-private extension Node {
-    func containsText(_ needle: String) -> Bool {
-        if isText {
-            return text?.contains(needle) ?? false
-        }
-        return content.contains { $0.containsText(needle) }
-    }
-
-    func replacingTextNode(atPath path: [Int], with text: String) -> Node {
-        guard let index = path.first else {
-            var copy = self
-            copy.text = text
-            return copy
-        }
-
-        var copy = self
-        copy.content[index] = copy.content[index].replacingTextNode(
-            atPath: Array(path.dropFirst()),
-            with: text
-        )
-        return copy
-    }
-
-    /// Replaces `range` (character offsets) of the text node at `path` with a
-    /// run of `middle` carrying `middleMarks`, keeping the surrounding text in
-    /// runs that retain the original Marks. Empty runs are dropped. The one
-    /// splice behind both marked insertion and mark add/remove.
-    func splicingTextNode(atPath path: [Int], replacing range: Range<Int>, withText middle: String, marks middleMarks: [Mark]) -> Node {
-        guard path.count == 2 else { return self }
-        var copy = self
-        let blockIndex = path[0]
-        let textIndex = path[1]
-        let original = copy.content[blockIndex].content[textIndex]
-        let text = original.text ?? ""
-        let lower = text.index(text.startIndex, offsetBy: range.lowerBound)
-        let upper = text.index(text.startIndex, offsetBy: range.upperBound)
-        var replacement: [Node] = []
-        let before = String(text[..<lower])
-        let after = String(text[upper...])
-        if !before.isEmpty {
-            replacement.append(.text(before, marks: original.marks))
-        }
-        if !middle.isEmpty {
-            replacement.append(.text(middle, marks: middleMarks))
-        }
-        if !after.isEmpty {
-            replacement.append(.text(after, marks: original.marks))
-        }
-        copy.content[blockIndex].content.replaceSubrange(textIndex...textIndex, with: replacement)
-        return copy
-    }
-
-    /// The text runs covering the block's first `offset` characters, Marks
-    /// preserved; the run straddling the cut is split.
-    func inlineRuns(upTo offset: Int) -> [Node] {
-        var runs: [Node] = []
-        var remaining = max(0, min(plainText.count, offset))
-        for child in content where child.isText {
-            guard remaining > 0 else { break }
-            let text = child.text ?? ""
-            if text.count <= remaining {
-                if !text.isEmpty {
-                    runs.append(child)
-                }
-                remaining -= text.count
-            } else {
-                let cut = text.index(text.startIndex, offsetBy: remaining)
-                runs.append(.text(String(text[..<cut]), marks: child.marks))
-                remaining = 0
-            }
-        }
-        return runs
-    }
-
-    /// The text runs from the block's character `offset` to its end, Marks
-    /// preserved; the run straddling the cut is split.
-    func inlineRuns(from offset: Int) -> [Node] {
-        var runs: [Node] = []
-        var remaining = max(0, min(plainText.count, offset))
-        for child in content where child.isText {
-            let text = child.text ?? ""
-            if remaining >= text.count {
-                remaining -= text.count
-                continue
-            }
-            if remaining > 0 {
-                let cut = text.index(text.startIndex, offsetBy: remaining)
-                runs.append(.text(String(text[cut...]), marks: child.marks))
-                remaining = 0
-            } else if !text.isEmpty {
-                runs.append(child)
-            }
-        }
-        return runs
-    }
-
-    func textNode(atPath path: [Int]) -> Node? {
-        guard path.count == 2,
-              content.indices.contains(path[0]),
-              content[path[0]].content.indices.contains(path[1]) else {
-            return nil
-        }
-        return content[path[0]].content[path[1]]
-    }
-}

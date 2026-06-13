@@ -89,6 +89,29 @@ public enum StepError: Error, Equatable, CustomStringConvertible {
     }
 }
 
+/// Adds or removes `mark` over `from..<to`, which must stay inside one text
+/// node, splitting the run so surrounding text keeps its Marks. The shared
+/// algebra behind both mark Steps, built on the block-replace primitive.
+private func settingMark(in document: Document, from: Position, to: Position, mark: Mark, enabled: Bool) throws -> Document {
+    guard let range = document.textRange(from: from, to: to) else {
+        throw StepError.unsupportedReplacement("mark range must stay inside one text node")
+    }
+    let existing = document.root.textNode(atPath: range.path)?.marks ?? []
+    let updated = enabled
+        ? MarkRules.adding(mark, to: existing)
+        : existing.filter { $0 != mark }
+    let lower = range.text.distance(from: range.text.startIndex, to: range.range.lowerBound)
+    let upper = range.text.distance(from: range.text.startIndex, to: range.range.upperBound)
+    let newRoot = document.root.splicingTextNode(
+        atPath: range.path,
+        replacing: lower..<upper,
+        withText: String(range.text[range.range]),
+        marks: updated
+    )
+    guard range.path.count == 2 else { return Document(newRoot) }
+    return document.replacingBlocks(in: range.path[0]..<(range.path[0] + 1), with: [newRoot.content[range.path[0]]])
+}
+
 public struct AddMarkStep: Step, Codable, Equatable, Sendable {
     public var from: Position
     public var to: Position
@@ -101,7 +124,7 @@ public struct AddMarkStep: Step, Codable, Equatable, Sendable {
     }
 
     public func apply(to document: Document) throws -> StepApplication {
-        StepApplication(document: try document.addingMark(from: from, to: to, mark: mark), changedRange: from..<to)
+        StepApplication(document: try settingMark(in: document, from: from, to: to, mark: mark, enabled: true), changedRange: from..<to)
     }
 
     public func inverted(in document: Document) throws -> any Step {
@@ -125,7 +148,7 @@ public struct RemoveMarkStep: Step, Codable, Equatable, Sendable {
     }
 
     public func apply(to document: Document) throws -> StepApplication {
-        StepApplication(document: try document.removingMark(from: from, to: to, mark: mark), changedRange: from..<to)
+        StepApplication(document: try settingMark(in: document, from: from, to: to, mark: mark, enabled: false), changedRange: from..<to)
     }
 
     public func inverted(in document: Document) throws -> any Step {

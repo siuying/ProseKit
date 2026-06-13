@@ -74,10 +74,10 @@ final class DerivedIndexTests: XCTestCase {
 
     func testSettingMarksDerivesIndex() throws {
         let textStart = document.position(ofTextInBlockAt: 1)!
-        let added = try document.addingMark(from: textStart, to: textStart + 6, mark: Mark(type: "bold"))
+        let added = try AddMarkStep(from: textStart, to: textStart + 6, mark: Mark(type: "bold")).apply(to: document).document
         assertIndexMatchesRebuild(added, "adding mark")
 
-        let removed = try added.removingMark(from: textStart, to: textStart + 6, mark: Mark(type: "bold"))
+        let removed = try RemoveMarkStep(from: textStart, to: textStart + 6, mark: Mark(type: "bold")).apply(to: added).document
         assertIndexMatchesRebuild(removed, "removing mark")
     }
 
