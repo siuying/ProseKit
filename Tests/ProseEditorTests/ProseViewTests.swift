@@ -111,6 +111,52 @@ final class ProseViewTests: XCTestCase {
         XCTAssertEqual(view.taskCheckboxPosition(at: point), 4)
     }
 
+    // `gesture.location(in:)` on a UIScrollView is already in content space
+    // (bounds.origin == contentOffset), so the hit-test must use it directly —
+    // the same convention as closestPosition(to:). When the keyboard scrolls the
+    // editor, a stray contentOffset add would push the hit rect off the tap.
+    func testTaskCheckboxHitTestHoldsWhenScrolled() throws {
+        let view = makeView(Document(.doc([
+            .paragraph([.text(String(repeating: "filler ", count: 60))]),
+            .taskList([.taskItem(checked: false, [.paragraph([.text("todo")])])]),
+        ])))
+        view.contentOffset.y = 200
+        let item = view.layoutBox!.children[1].children[0]
+        let paragraph = item.children[0]
+        let lineHeight = paragraph.lineFragments.first!.frame.height
+        let point = CGPoint(x: item.frame.minX + 12, y: paragraph.frame.minY + lineHeight / 2)
+
+        XCTAssertEqual(view.taskCheckboxPosition(at: point), item.children[0].positionRange.lowerBound + 1)
+    }
+
+    func testTappingCheckboxTogglesCheckedAttrBothWays() throws {
+        let view = makeView(Document(.doc([
+            .taskList([.taskItem(checked: false, [.paragraph([.text("todo")])])]),
+        ])))
+        let item = view.layoutBox!.children[0].children[0]
+        let paragraph = item.children[0]
+        let lineHeight = paragraph.lineFragments.first!.frame.height
+        let point = CGPoint(x: item.frame.minX + 12, y: paragraph.frame.minY + lineHeight / 2)
+
+        func checked() -> Bool {
+            view.layoutBox!.children[0].children[0].node.attrs["checked"]?.boolValue ?? false
+        }
+
+        XCTAssertFalse(checked())
+        XCTAssertTrue(view.toggleTaskCheckbox(at: point))
+        XCTAssertTrue(checked())
+        XCTAssertTrue(view.toggleTaskCheckbox(at: point))
+        XCTAssertFalse(checked())
+    }
+
+    func testTapMissingAnyCheckboxLeavesDocumentUnchanged() throws {
+        let view = makeView(Document(.doc([
+            .taskList([.taskItem(checked: false, [.paragraph([.text("todo")])])]),
+        ])))
+        // Far to the right of the checkbox, over the text — not a checkbox hit.
+        XCTAssertFalse(view.toggleTaskCheckbox(at: CGPoint(x: 200, y: 12)))
+    }
+
     func testCopyPutsSelectedPlainTextOnPasteboard() throws {
         let view = makeView(Document(.doc([.paragraph([.text("hello world")])])))
         let pasteboard = UIPasteboard.withUniqueName()

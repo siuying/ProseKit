@@ -381,6 +381,7 @@ import UIKit
     public func setLink(_ href: String) { runCommand(Commands.setLink(href: href)) }
     public func setTextAlign(_ value: String?) { runCommand(Commands.setTextAlign(value)) }
     public func setBlockType(headingLevel level: Int?) { runCommand(Commands.setBlockType(headingLevel: level)) }
+    public func wrapInList(_ listType: String) { runCommand(Commands.wrapInList(listType)) }
     public func sinkListItem() { runCommand(Commands.sinkListItem()) }
     public func liftListItem() { runCommand(Commands.liftListItem()) }
     public func toggleTaskItemChecked() { runCommand(Commands.toggleTaskItemChecked()) }
@@ -392,10 +393,17 @@ import UIKit
     public var activeHeadingLevel: Int? { state.activeHeadingLevel }
 
     @objc private func taskCheckboxTapped(_ gesture: UITapGestureRecognizer) {
-        guard gesture.state == .ended,
-              let position = taskCheckboxPosition(at: gesture.location(in: self)) else {
-            return
-        }
+        guard gesture.state == .ended else { return }
+        toggleTaskCheckbox(at: gesture.location(in: self))
+    }
+
+    /// Toggles the `checked` attr of the task item whose checkbox sits under
+    /// `point` (content space). Returns whether a checkbox was hit. Split from
+    /// the gesture handler so the tap→toggle path is testable without UIKit
+    /// gesture recognition.
+    @discardableResult
+    func toggleTaskCheckbox(at point: CGPoint) -> Bool {
+        guard let position = taskCheckboxPosition(at: point) else { return false }
         state = EditorState(
             document: state.document,
             selection: TextSelection(anchor: position, head: position),
@@ -403,18 +411,23 @@ import UIKit
             typingMarks: state.typingMarks
         )
         toggleTaskItemChecked()
+        return true
     }
 
-    func taskCheckboxPosition(at viewportPoint: CGPoint) -> Position? {
+    /// `point` is in content space — a UIScrollView's `bounds.origin` is its
+    /// `contentOffset`, so `gesture.location(in: self)` already accounts for the
+    /// scroll, exactly like the point handed to `closestPosition(to:)`.
+    func taskCheckboxPosition(at point: CGPoint) -> Position? {
         guard let layoutBox else { return nil }
-        let point = CGPoint(x: viewportPoint.x + contentOffset.x, y: viewportPoint.y + contentOffset.y)
 
         func visit(_ box: LayoutBox) -> Position? {
             if box.node.type == "taskItem" {
                 let size: CGFloat = 13
                 let lineCenter = box.frame.minY + taskFirstLineCenterOffset(in: box)
                 let rect = CGRect(x: box.frame.minX + 6, y: lineCenter - size / 2, width: size, height: size).insetBy(dx: -6, dy: -6)
-                if rect.contains(point), let firstLeaf = box.leaves.first {
+                // `leaves` is populated on the root box only, so descend the
+                // children to the item's own first leaf instead.
+                if rect.contains(point), let firstLeaf = firstLeafBlock(in: box) {
                     return firstLeaf.positionRange.lowerBound + 1
                 }
             }
@@ -425,6 +438,14 @@ import UIKit
         }
 
         return visit(layoutBox)
+    }
+
+    private func firstLeafBlock(in box: LayoutBox) -> LayoutBox? {
+        if box.kind == .leafBlock { return box }
+        for child in box.children {
+            if let leaf = firstLeafBlock(in: child) { return leaf }
+        }
+        return nil
     }
 
     private func taskFirstLineCenterOffset(in box: LayoutBox) -> CGFloat {
