@@ -76,4 +76,58 @@ final class ListItemStructuralTests: XCTestCase {
         let restored = try inverse.apply(to: wrapped).document
         XCTAssertEqual(restored, document)
     }
+
+    func testSinkListItemNestsItUnderPreviousItemAndInverts() throws {
+        let document = makeDocument()
+        let sink = SinkListItemStep(at: 10)
+        let sunk = try sink.apply(to: document).document
+        let firstItem = sunk.root.content[0].content[0]
+        XCTAssertEqual(sunk.root.content[0].content.count, 1)
+        XCTAssertEqual(firstItem.content.map(\.type), ["paragraph", "bulletList"])
+        XCTAssertEqual(firstItem.content[1].content.map(\.plainText), ["cd"])
+
+        let inverse = try sink.inverted(in: document)
+        let restored = try inverse.apply(to: sunk).document
+        XCTAssertEqual(restored, document)
+    }
+
+    func testLiftNestedListItemOutAfterParentItemAndInverts() throws {
+        let document = Document(.doc([
+            .bulletList([
+                .listItem([
+                    .paragraph([.text("ab")]),
+                    .bulletList([.listItem([.paragraph([.text("cd")])])]),
+                ]),
+                .listItem([.paragraph([.text("ef")])]),
+            ]),
+        ]))
+        let lift = LiftNestedListItemStep(at: 10)
+        let lifted = try lift.apply(to: document).document
+        XCTAssertEqual(lifted.root.content[0].content.map(\.plainText), ["ab", "cd", "ef"])
+        XCTAssertEqual(lifted.root.content[0].content[0].content.map(\.type), ["paragraph"])
+
+        let inverse = try lift.inverted(in: document)
+        let restored = try inverse.apply(to: lifted).document
+        XCTAssertEqual(restored, document)
+    }
+
+    func testTaskItemAttrsSurviveSplitSinkAndLift() throws {
+        let document = Document(.doc([
+            .taskList([
+                .taskItem(checked: true, [.paragraph([.text("ab")])]),
+                .taskItem(checked: false, [.paragraph([.text("cd")])]),
+            ]),
+        ]))
+        let split = try SplitListItemStep(at: 5).apply(to: document).document
+        XCTAssertEqual(split.root.content[0].content[0].attrs["checked"], .bool(true))
+        XCTAssertEqual(split.root.content[0].content[1].attrs["checked"], .bool(true))
+
+        let sunk = try SinkListItemStep(at: 10).apply(to: document).document
+        let nested = sunk.root.content[0].content[0].content[1]
+        XCTAssertEqual(nested.type, "taskList")
+        XCTAssertEqual(nested.content[0].attrs["checked"], .bool(false))
+
+        let lifted = try LiftNestedListItemStep(at: 10).apply(to: sunk).document
+        XCTAssertEqual(lifted.root.content[0].content.map { $0.attrs["checked"] }, [.bool(true), .bool(false)])
+    }
 }

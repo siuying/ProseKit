@@ -91,12 +91,85 @@ final class ProseViewTests: XCTestCase {
         XCTAssertEqual(spy.events, [.selectionWillChange, .selectionDidChange])
     }
 
+    func testMovingTheSelectionDoesNotRepaintTheCanvas() throws {
+        let view = makeView(Document(.doc([.paragraph([.text("hello world")])])))
+        view.layoutIfNeeded()
+        // Consume the layout pass's repaint so the flag starts clean.
+        view.canvas.layer.displayIfNeeded()
+        XCTAssertFalse(view.canvas.layer.needsDisplay(), "precondition: canvas should be clean before the selection change")
+
+        view.selectedTextRange = ProseTextRange(anchor: 2, head: 7)
+
+        XCTAssertFalse(
+            view.canvas.layer.needsDisplay(),
+            "selection changes draw no canvas pixels — the system draws the caret/selection — so they must not invalidate the Canvas"
+        )
+    }
+
     func testEditableTextInteractionOwnsSelectionUX() throws {
         let view = makeView(Document(.doc([.paragraph([.text("hello world")])])))
         let interaction = view.interactions.compactMap { $0 as? UITextInteraction }.first
 
         XCTAssertNotNil(interaction, "system selection UX requires a UITextInteraction")
         XCTAssertEqual(interaction?.textInput === view, true)
+    }
+
+    func testTaskCheckboxHitTestReturnsTaskItemTextStart() throws {
+        let view = makeView(Document(.doc([
+            .taskList([.taskItem(checked: false, [.paragraph([.text("todo")])])]),
+        ])))
+        let item = view.layoutBox!.children[0].children[0]
+        let paragraph = item.children[0]
+        let lineHeight = paragraph.lineFragments.first!.frame.height
+        let point = CGPoint(x: item.frame.minX + 12, y: paragraph.frame.minY + lineHeight / 2)
+
+        XCTAssertEqual(view.taskCheckboxPosition(at: point), 4)
+    }
+
+    // `gesture.location(in:)` on a UIScrollView is already in content space
+    // (bounds.origin == contentOffset), so the hit-test must use it directly —
+    // the same convention as closestPosition(to:). When the keyboard scrolls the
+    // editor, a stray contentOffset add would push the hit rect off the tap.
+    func testTaskCheckboxHitTestHoldsWhenScrolled() throws {
+        let view = makeView(Document(.doc([
+            .paragraph([.text(String(repeating: "filler ", count: 60))]),
+            .taskList([.taskItem(checked: false, [.paragraph([.text("todo")])])]),
+        ])))
+        view.contentOffset.y = 200
+        let item = view.layoutBox!.children[1].children[0]
+        let paragraph = item.children[0]
+        let lineHeight = paragraph.lineFragments.first!.frame.height
+        let point = CGPoint(x: item.frame.minX + 12, y: paragraph.frame.minY + lineHeight / 2)
+
+        XCTAssertEqual(view.taskCheckboxPosition(at: point), item.children[0].positionRange.lowerBound + 1)
+    }
+
+    func testTappingCheckboxTogglesCheckedAttrBothWays() throws {
+        let view = makeView(Document(.doc([
+            .taskList([.taskItem(checked: false, [.paragraph([.text("todo")])])]),
+        ])))
+        let item = view.layoutBox!.children[0].children[0]
+        let paragraph = item.children[0]
+        let lineHeight = paragraph.lineFragments.first!.frame.height
+        let point = CGPoint(x: item.frame.minX + 12, y: paragraph.frame.minY + lineHeight / 2)
+
+        func checked() -> Bool {
+            view.layoutBox!.children[0].children[0].node.attrs["checked"]?.boolValue ?? false
+        }
+
+        XCTAssertFalse(checked())
+        XCTAssertTrue(view.toggleTaskCheckbox(at: point))
+        XCTAssertTrue(checked())
+        XCTAssertTrue(view.toggleTaskCheckbox(at: point))
+        XCTAssertFalse(checked())
+    }
+
+    func testTapMissingAnyCheckboxLeavesDocumentUnchanged() throws {
+        let view = makeView(Document(.doc([
+            .taskList([.taskItem(checked: false, [.paragraph([.text("todo")])])]),
+        ])))
+        // Far to the right of the checkbox, over the text — not a checkbox hit.
+        XCTAssertFalse(view.toggleTaskCheckbox(at: CGPoint(x: 200, y: 12)))
     }
 
     func testCopyPutsSelectedPlainTextOnPasteboard() throws {

@@ -51,6 +51,55 @@ final class CommandTests: XCTestCase {
         XCTAssertEqual(state.selection, TextSelection(anchor: 8, head: 8))
     }
 
+    func testWrapInListTurnsParagraphIntoOneItemList() throws {
+        var state = EditorState(document: Document(.doc([
+            .paragraph([.text("hello")]),
+        ])), selection: TextSelection(anchor: 3, head: 3))
+
+        XCTAssertTrue(try Commands.wrapInList("bulletList").run(in: &state))
+
+        XCTAssertEqual(state.document.root.content.map(\.type), ["bulletList"])
+        let list = state.document.root.content[0]
+        XCTAssertEqual(list.content.map(\.type), ["listItem"])
+        XCTAssertEqual(list.content[0].content[0].plainText, "hello")
+        // Caret stays in the same character, shifted past the two new open tokens.
+        XCTAssertEqual(state.selection, TextSelection(anchor: 5, head: 5))
+    }
+
+    func testWrapInOrderedListCarriesStartAndOrderedItemType() throws {
+        var state = EditorState(document: Document(.doc([
+            .paragraph([.text("hi")]),
+        ])), selection: TextSelection(anchor: 1, head: 1))
+
+        XCTAssertTrue(try Commands.wrapInList("orderedList").run(in: &state))
+
+        let list = state.document.root.content[0]
+        XCTAssertEqual(list.type, "orderedList")
+        XCTAssertEqual(list.attrs["start"]?.intValue, 1)
+        XCTAssertEqual(list.content.map(\.type), ["listItem"])
+    }
+
+    func testWrapInTaskListUsesTaskItem() throws {
+        var state = EditorState(document: Document(.doc([
+            .paragraph([.text("hi")]),
+        ])), selection: TextSelection(anchor: 1, head: 1))
+
+        XCTAssertTrue(try Commands.wrapInList("taskList").run(in: &state))
+
+        let list = state.document.root.content[0]
+        XCTAssertEqual(list.type, "taskList")
+        XCTAssertEqual(list.content.map(\.type), ["taskItem"])
+    }
+
+    func testWrapInListNoOpsInsideAnExistingList() throws {
+        var state = EditorState(document: Document(.doc([
+            .bulletList([.listItem([.paragraph([.text("ab")])])]),
+        ])), selection: TextSelection(anchor: 4, head: 4))
+
+        XCTAssertFalse(try Commands.wrapInList("bulletList").run(in: &state))
+        XCTAssertEqual(state.document.root.content.map(\.type), ["bulletList"])
+    }
+
     func testBackspaceAtBlockStartJoinsWithPreviousBlock() throws {
         var state = EditorState(document: Document(.doc([
             .paragraph([.text("hello")]),
@@ -80,6 +129,38 @@ final class CommandTests: XCTestCase {
         XCTAssertEqual(list.content.count, 1)
         XCTAssertEqual(list.content[0].plainText, "abcd")
         XCTAssertEqual(state.selection, TextSelection(anchor: 6, head: 6))
+    }
+
+    func testIndentListItemSinksUnderPreviousItem() throws {
+        var state = EditorState(document: Document(.doc([
+            .bulletList([
+                .listItem([.paragraph([.text("ab")])]),
+                .listItem([.paragraph([.text("cd")])]),
+            ]),
+        ])), selection: TextSelection(anchor: 10, head: 10))
+
+        XCTAssertTrue(try Commands.sinkListItem().run(in: &state))
+
+        let firstItem = state.document.root.content[0].content[0]
+        XCTAssertEqual(state.document.root.content[0].content.count, 1)
+        XCTAssertEqual(firstItem.content.map(\.type), ["paragraph", "bulletList"])
+        XCTAssertEqual(state.selection, TextSelection(anchor: 10, head: 10))
+    }
+
+    func testOutdentNestedListItemLiftsAfterParentItem() throws {
+        var state = EditorState(document: Document(.doc([
+            .bulletList([
+                .listItem([
+                    .paragraph([.text("ab")]),
+                    .bulletList([.listItem([.paragraph([.text("cd")])])]),
+                ]),
+            ]),
+        ])), selection: TextSelection(anchor: 10, head: 10))
+
+        XCTAssertTrue(try Commands.liftListItem().run(in: &state))
+
+        XCTAssertEqual(state.document.root.content[0].content.map(\.plainText), ["ab", "cd"])
+        XCTAssertEqual(state.selection, TextSelection(anchor: 10, head: 10))
     }
 
     func testJoinBackwardPreservesMarksOfBothBlocks() throws {
@@ -160,6 +241,18 @@ final class CommandTests: XCTestCase {
 
         XCTAssertTrue(try Commands.setTextAlign(nil).run(in: &state))
         XCTAssertNil(state.document.root.content[0].attrs["textAlign"], "left/nil clears the redundant attr")
+    }
+
+    func testToggleTaskItemCheckedFlipsTheContainingTaskItemAttr() throws {
+        var state = EditorState(document: Document(.doc([
+            .taskList([.taskItem(checked: false, [.paragraph([.text("todo")])])]),
+        ])), selection: TextSelection(anchor: 4, head: 4))
+
+        XCTAssertTrue(try Commands.toggleTaskItemChecked().run(in: &state))
+        XCTAssertEqual(state.document.root.content[0].content[0].attrs["checked"], .bool(true))
+
+        XCTAssertTrue(try Commands.toggleTaskItemChecked().run(in: &state))
+        XCTAssertEqual(state.document.root.content[0].content[0].attrs["checked"], .bool(false))
     }
 
     func testSetLinkWrapsSelectionInLinkMark() throws {

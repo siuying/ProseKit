@@ -67,8 +67,20 @@ public struct Node: Codable, Hashable, Sendable {
         Node(type: "bulletList", content: items)
     }
 
+    public static func orderedList(start: Int = 1, _ items: [Node]) -> Node {
+        Node(type: "orderedList", attrs: ["start": .int(start)], content: items)
+    }
+
     public static func listItem(_ content: [Node]) -> Node {
         Node(type: "listItem", content: content)
+    }
+
+    public static func taskList(_ items: [Node]) -> Node {
+        Node(type: "taskList", content: items)
+    }
+
+    public static func taskItem(checked: Bool = false, _ content: [Node]) -> Node {
+        Node(type: "taskItem", attrs: ["checked": .bool(checked)], content: content)
     }
 
     public func withContent(_ content: [Node]) -> Node {
