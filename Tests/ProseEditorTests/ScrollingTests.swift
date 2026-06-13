@@ -309,6 +309,25 @@ final class ScrollingTests: XCTestCase {
         XCTAssertEqual(view.contentOffset.y, maxOffset, accuracy: 0.5, "autoscroll must clamp to the content edge")
     }
 
+    /// A UIScrollView is the delegate of its own pan/touch gestures, and
+    /// ProseView is additionally the checkbox tap's delegate. The checkbox
+    /// gating in `gestureRecognizer(_:shouldReceive:)` must answer for the
+    /// checkbox tap alone — gating the scroll pan there makes it reject every
+    /// touch off a checkbox, so the Viewport stops scrolling (the 2026-06-13
+    /// regression that shipped with the checkbox tap delegate).
+    func testScrollPanGestureIsNotGatedByTheCheckboxDelegate() {
+        let view = makeView(tallFixture) // plain paragraphs: no checkbox anywhere
+        let touch = StubTouch(at: CGPoint(x: 5, y: 5))
+        XCTAssertNil(
+            view.taskCheckboxPosition(at: CGPoint(x: 5, y: 5)),
+            "fixture must have no checkbox under the touch, so the gate would reject it"
+        )
+        XCTAssertTrue(
+            view.gestureRecognizer(view.panGestureRecognizer, shouldReceive: touch),
+            "the scroll view's own pan must receive touches everywhere; gating it kills scrolling"
+        )
+    }
+
     func testLongDocumentIsScrollableToTheLayoutHeight() throws {
         let document = tallFixture
         let view = makeView(document)
@@ -319,5 +338,17 @@ final class ScrollingTests: XCTestCase {
         XCTAssertEqual(view.contentSize.height, layoutHeight, accuracy: 0.5)
         XCTAssertEqual(view.contentSize.width, Self.size.width, accuracy: 0.5)
     }
+}
+
+/// A UITouch reporting a fixed location — UITouch has no public initializer and
+/// can't be synthesised, so the gesture-delegate test stubs the one thing it
+/// reads.
+private final class StubTouch: UITouch {
+    private let point: CGPoint
+    init(at point: CGPoint) {
+        self.point = point
+        super.init()
+    }
+    override func location(in view: UIView?) -> CGPoint { point }
 }
 #endif
