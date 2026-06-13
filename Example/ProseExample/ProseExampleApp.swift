@@ -292,8 +292,11 @@ private struct SimpleEditorToolbar: View {
             .padding(.vertical, 8)
         }
         .background(.bar)
-        // Re-read active state whenever the editor reports a change.
-        .id(editor.revision)
+        // The toolbar observes `editor`, so a bumped `revision` already re-runs
+        // this body and re-reads the active-state tints. An `.id(revision)` here
+        // would also work, but it throws away the whole view tree (Menus and
+        // all) and rebuilds it from scratch on every keystroke and caret move —
+        // a main-thread hostage that made typing choppy on the simulator.
     }
 
     private func markButton(_ mark: Mark, symbol: String, label: String) -> some View {
