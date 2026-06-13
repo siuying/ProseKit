@@ -59,16 +59,18 @@ import UIKit
         in context: CGContext,
         contentRect: CGRect,
         flippedAbout flipHeight: CGFloat,
-        checkedTaskItem: Bool = false
+        checkedTaskItem: Bool = false,
+        orderedListDepth: Int = 0
     ) {
         guard box.frame.intersects(contentRect) else { return }
         switch box.kind {
         case .leafBlock:
             draw(block: box, in: context, flippedAbout: flipHeight, checkedTaskItem: checkedTaskItem)
         case .container:
-            drawContainerDecoration(box, parent: parent, in: context, flippedAbout: flipHeight)
+            drawContainerDecoration(box, parent: parent, in: context, flippedAbout: flipHeight, orderedListDepth: orderedListDepth)
             let childCheckedTaskItem = checkedTaskItem
                 || (box.node.type == "taskItem" && box.node.attrs["checked"]?.boolValue == true)
+            let childOrderedListDepth = orderedListDepth + (box.node.type == "orderedList" ? 1 : 0)
             for child in box.children {
                 if child.frame.minY > contentRect.maxY { break }
                 drawBox(
@@ -77,7 +79,8 @@ import UIKit
                     in: context,
                     contentRect: contentRect,
                     flippedAbout: flipHeight,
-                    checkedTaskItem: childCheckedTaskItem
+                    checkedTaskItem: childCheckedTaskItem,
+                    orderedListDepth: childOrderedListDepth
                 )
             }
         }
@@ -86,7 +89,13 @@ import UIKit
     /// Container decorations drawn in content space (flipped about the layout
     /// height like the glyphs). Slice 01: the blockquote's vertical rule down
     /// its indent band.
-    private func drawContainerDecoration(_ box: LayoutBox, parent: LayoutBox?, in context: CGContext, flippedAbout flipHeight: CGFloat) {
+    private func drawContainerDecoration(
+        _ box: LayoutBox,
+        parent: LayoutBox?,
+        in context: CGContext,
+        flippedAbout flipHeight: CGFloat,
+        orderedListDepth: Int
+    ) {
         switch box.node.type {
         case "blockquote":
             let rule = CGRect(
@@ -101,7 +110,7 @@ import UIKit
             context.restoreGState()
         case "listItem":
             if parent?.node.type == "orderedList" {
-                drawOrderedMarker(for: box, parent: parent, in: context, flippedAbout: flipHeight)
+                drawOrderedMarker(for: box, parent: parent, in: context, flippedAbout: flipHeight, orderedListDepth: orderedListDepth)
             } else {
                 // A bullet disc centred on the item's first line, in the indent
                 // band to the left of the text.
@@ -121,13 +130,19 @@ import UIKit
         }
     }
 
-    private func drawOrderedMarker(for box: LayoutBox, parent: LayoutBox?, in context: CGContext, flippedAbout flipHeight: CGFloat) {
+    private func drawOrderedMarker(
+        for box: LayoutBox,
+        parent: LayoutBox?,
+        in context: CGContext,
+        flippedAbout flipHeight: CGFloat,
+        orderedListDepth: Int
+    ) {
         guard let parent,
               let index = parent.children.firstIndex(where: { $0.positionRange == box.positionRange }) else {
             return
         }
         let start = parent.node.attrs["start"]?.intValue ?? 1
-        let marker = "\(start + index)."
+        let marker = Self.orderedMarkerText(forItemIndex: index, start: start, orderedListDepth: orderedListDepth)
         let attributes: [NSAttributedString.Key: Any] = [
             .font: UIFont.preferredFont(forTextStyle: .body),
             .foregroundColor: UIColor.label,
@@ -146,6 +161,51 @@ import UIKit
 
     static func orderedMarkerOriginX(markerWidth: CGFloat, itemMinX: CGFloat) -> CGFloat {
         max(itemMinX + 4, itemMinX + containerIndent(forType: "listItem") - 8 - markerWidth)
+    }
+
+    static func orderedMarkerText(forItemIndex itemIndex: Int, start: Int, orderedListDepth: Int) -> String {
+        let ordinal = start + itemIndex
+        let marker: String
+        switch (max(orderedListDepth, 1) - 1) % 3 {
+        case 1:
+            marker = lowerAlphaOrdinal(ordinal)
+        case 2:
+            marker = lowerRomanOrdinal(ordinal)
+        default:
+            marker = "\(ordinal)"
+        }
+        return "\(marker)."
+    }
+
+    private static func lowerAlphaOrdinal(_ value: Int) -> String {
+        guard value > 0 else { return "\(value)" }
+        var result = ""
+        var n = value
+        while n > 0 {
+            n -= 1
+            let scalar = UnicodeScalar(97 + (n % 26))!
+            result.insert(Character(scalar), at: result.startIndex)
+            n /= 26
+        }
+        return result
+    }
+
+    private static func lowerRomanOrdinal(_ value: Int) -> String {
+        guard value > 0, value < 4000 else { return "\(value)" }
+        var n = value
+        var result = ""
+        let numerals: [(Int, String)] = [
+            (1000, "m"), (900, "cm"), (500, "d"), (400, "cd"),
+            (100, "c"), (90, "xc"), (50, "l"), (40, "xl"),
+            (10, "x"), (9, "ix"), (5, "v"), (4, "iv"), (1, "i"),
+        ]
+        for (number, numeral) in numerals {
+            while n >= number {
+                result += numeral
+                n -= number
+            }
+        }
+        return result
     }
 
     private func drawTaskCheckbox(for box: LayoutBox, in context: CGContext, flippedAbout flipHeight: CGFloat) {
