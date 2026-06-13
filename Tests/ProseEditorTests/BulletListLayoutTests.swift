@@ -84,6 +84,28 @@ final class BulletListLayoutTests: XCTestCase {
         XCTAssertEqual(root.leaves.map { $0.node.plainText }, ["first", "second"])
     }
 
+    func testNestedOrderedListMarkerBandStartsAtParentContentEdge() throws {
+        let document = Document(.doc([
+            .orderedList([
+                .listItem([
+                    .paragraph([.text("parent")]),
+                    .orderedList([
+                        .listItem([.paragraph([.text("child")])]),
+                    ]),
+                ]),
+            ]),
+        ]))
+        var store = IncrementalLayoutStore(schema: .slice1, width: 320)
+        let root = try store.layout(document)
+
+        let parentParagraph = root.children[0].children[0].children[0]
+        let nestedList = root.children[0].children[0].children[1]
+        let nestedParagraph = nestedList.children[0].children[0]
+
+        XCTAssertEqual(nestedList.frame.minX, parentParagraph.frame.minX)
+        XCTAssertEqual(nestedParagraph.frame.minX, parentParagraph.frame.minX + containerIndent(forType: "listItem"))
+    }
+
     func testTaskListValidatesAndRoundTripsThroughJSON() throws {
         let document = Document(.doc([
             .taskList([.taskItem(checked: true, [.paragraph([.text("done")])])]),

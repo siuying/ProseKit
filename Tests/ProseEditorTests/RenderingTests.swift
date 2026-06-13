@@ -140,6 +140,20 @@ final class RenderingTests: XCTestCase {
         )
     }
 
+    func testOrderedMarkerOriginStaysInsideContentBounds() {
+        let markerX = CanvasView.orderedMarkerOriginX(markerWidth: 32, itemMinX: 0)
+
+        XCTAssertGreaterThanOrEqual(markerX, 0, "ordered markers must not start offscreen and get clipped")
+        XCTAssertLessThanOrEqual(markerX + 32, containerIndent(forType: "listItem"), "marker should stay in the indent band")
+    }
+
+    func testOrderedMarkersUseLevelAwareStyles() {
+        XCTAssertEqual(CanvasView.orderedMarkerText(forItemIndex: 0, start: 1, orderedListDepth: 1), "1.")
+        XCTAssertEqual(CanvasView.orderedMarkerText(forItemIndex: 1, start: 1, orderedListDepth: 2), "b.")
+        XCTAssertEqual(CanvasView.orderedMarkerText(forItemIndex: 2, start: 1, orderedListDepth: 3), "iii.")
+        XCTAssertEqual(CanvasView.orderedMarkerText(forItemIndex: 3, start: 1, orderedListDepth: 4), "4.")
+    }
+
     func testTypingMidBlockRendersLikeFreshView() {
         let view = makeView(fixture)
         // Middle of the second on-screen block.

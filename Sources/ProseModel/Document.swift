@@ -180,6 +180,27 @@ public struct Document: Codable, Hashable, Sendable {
         return node
     }
 
+    /// The Position of the node at `path` (root-to-node child indices); the
+    /// root is Position 0.
+    public func position(ofNodeAtPath path: [Int]) -> Position? {
+        guard !path.isEmpty else { return 0 }
+        var node = root
+        var position: Position = 1
+        for (depth, childIndex) in path.enumerated() {
+            guard node.content.indices.contains(childIndex) else { return nil }
+            for siblingIndex in 0..<childIndex {
+                position += node.content[siblingIndex].nodeSize
+            }
+            let child = node.content[childIndex]
+            if depth == path.count - 1 {
+                return position
+            }
+            position += 1
+            node = child
+        }
+        return nil
+    }
+
     private func derivedIndex(replacingBlocksIn range: Range<Int>, with newBlocks: [Node]) -> BlockIndex {
         var starts = index.blockStarts
         var textCounts = index.blockTextCounts

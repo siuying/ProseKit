@@ -816,6 +816,91 @@ public struct WrapInListStep: Step, Codable, Equatable, Sendable {
     }
 }
 
+/// Changes the containing list's type while preserving its item contents.
+public struct ChangeListTypeStep: Step, Codable, Equatable, Sendable {
+    public var at: Position
+    public var listType: String
+    public var listAttrs: [String: JSONValue]
+    public var itemAttrs: [[String: JSONValue]]?
+
+    public init(
+        at: Position,
+        listType: String,
+        listAttrs: [String: JSONValue] = [:],
+        itemAttrs: [[String: JSONValue]]? = nil
+    ) {
+        self.at = at
+        self.listType = listType
+        self.listAttrs = listAttrs
+        self.itemAttrs = itemAttrs
+    }
+
+    public func apply(to document: Document) throws -> StepApplication {
+        guard isListType(listType),
+              let info = document.blockInfo(containing: at),
+              info.path.count >= 3 else {
+            throw StepError.unsupportedReplacement("changeListType requires a list item")
+        }
+        let itemPath = Array(info.path.dropLast())
+        let listPath = Array(itemPath.dropLast())
+        let item = document.node(atPath: itemPath)
+        let list = document.node(atPath: listPath)
+        guard isListItemType(item.type), isListType(list.type), item.type == itemType(forListType: list.type) else {
+            throw StepError.unsupportedReplacement("changeListType requires a list")
+        }
+
+        let targetItemType = itemType(forListType: listType)
+        let convertedItems = list.content.enumerated().map { index, existing in
+            Node(
+                type: targetItemType,
+                attrs: attrsForTargetItem(at: index),
+                content: existing.content
+            )
+        }
+        let converted = Node(type: listType, attrs: listAttrs, content: convertedItems)
+        let listStart = nodeStart(atPath: listPath, in: document) ?? info.start
+        let parentPath = Array(listPath.dropLast())
+        let listIndex = listPath.last ?? 0
+        return StepApplication(
+            document: document.replacingBlocks(
+                at: parentPath,
+                childRange: listIndex..<(listIndex + 1),
+                with: [converted]
+            ),
+            changedRange: listStart..<(listStart + list.nodeSize)
+        )
+    }
+
+    public func inverted(in document: Document) throws -> any Step {
+        guard let info = document.blockInfo(containing: at), info.path.count >= 3 else {
+            throw StepError.unsupportedReplacement("changeListType requires a list item")
+        }
+        let itemPath = Array(info.path.dropLast())
+        let listPath = Array(itemPath.dropLast())
+        let list = document.node(atPath: listPath)
+        guard isListType(list.type) else {
+            throw StepError.unsupportedReplacement("changeListType requires a list")
+        }
+        return ChangeListTypeStep(
+            at: at,
+            listType: list.type,
+            listAttrs: list.attrs,
+            itemAttrs: list.content.map(\.attrs)
+        )
+    }
+
+    public func map(_ position: Position) -> Position {
+        position
+    }
+
+    private func attrsForTargetItem(at index: Int) -> [String: JSONValue] {
+        if let itemAttrs, itemAttrs.indices.contains(index) {
+            return itemAttrs[index]
+        }
+        return listType == "taskList" ? ["checked": .bool(false)] : [:]
+    }
+}
+
 /// Lifts the block whose node range is `blockRange` — which must be the first
 /// child of its container — out to the container's own parent, before the
 /// container. If it was the container's only child, the now-empty container is
