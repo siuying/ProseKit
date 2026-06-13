@@ -30,6 +30,10 @@ import UIKit
     lazy var proseTokenizer = UITextInputStringTokenizer(textInput: self)
     /// The Canvas (ADR 0002); it owns all drawing — see CanvasView.
     let canvas = CanvasView()
+    /// The task-checkbox tap; kept so the gesture delegate can gate only this
+    /// recognizer and never the scroll view's own pan/touch gestures, whose
+    /// delegate is also `self` (a UIScrollView is its own gestures' delegate).
+    private var checkboxTap: UITapGestureRecognizer?
 
     public init(document: Document, schema: Schema = .slice1) {
         self.state = EditorState(document: document)
@@ -53,6 +57,7 @@ import UIKit
         // for direct touches and swallows tap-to-position-caret — pointer
         // clicks route through a separate path, so they keep working.
         checkboxTap.delegate = self
+        self.checkboxTap = checkboxTap
         addGestureRecognizer(checkboxTap)
         // Caret-follow is built in, so keyboard avoidance must be too —
         // otherwise revealing the caret can park it under the keyboard.
@@ -638,20 +643,29 @@ extension ProseView: UIGestureRecognizerDelegate {
     /// checkbox. Everywhere else it declines the touch entirely, so it never
     /// arbitrates against UITextInteraction's tap and direct-touch
     /// caret positioning behaves like UITextView.
+    ///
+    /// Self is also the delegate of the scroll view's own pan/touch gestures
+    /// (a UIScrollView is its own gestures' delegate), so this must answer for
+    /// the checkbox tap alone and defer to the default (accept) for the rest —
+    /// gating the scroll pan here would stop scrolling everywhere off a
+    /// checkbox.
     public func gestureRecognizer(
         _ gestureRecognizer: UIGestureRecognizer,
         shouldReceive touch: UITouch
     ) -> Bool {
-        taskCheckboxPosition(at: touch.location(in: self)) != nil
+        guard gestureRecognizer === checkboxTap else { return true }
+        return taskCheckboxPosition(at: touch.location(in: self)) != nil
     }
 
     /// Even on a checkbox, let the system's recognizers run alongside ours so
-    /// the gating above is the only thing the checkbox tap ever blocks.
+    /// the gating above is the only thing the checkbox tap ever blocks. Scoped
+    /// to the checkbox tap so the scroll view's own gesture relationships are
+    /// left at their defaults.
     public func gestureRecognizer(
         _ gestureRecognizer: UIGestureRecognizer,
         shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
     ) -> Bool {
-        true
+        gestureRecognizer === checkboxTap || other === checkboxTap
     }
 }
 #endif
