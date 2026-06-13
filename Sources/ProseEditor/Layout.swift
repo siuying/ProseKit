@@ -314,7 +314,7 @@ private func typesetLeafBlock(
 func containerIndent(forType type: String) -> CGFloat {
     switch type {
     case "blockquote": return 20
-    case "listItem": return 28 // room for the marker drawn in the band to its left
+    case "listItem", "taskItem": return 28 // room for the marker drawn in the band to its left
     default: return 0          // bulletList itself adds no indent; its items do
     }
 }

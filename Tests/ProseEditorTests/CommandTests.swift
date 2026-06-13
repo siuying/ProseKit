@@ -194,6 +194,18 @@ final class CommandTests: XCTestCase {
         XCTAssertNil(state.document.root.content[0].attrs["textAlign"], "left/nil clears the redundant attr")
     }
 
+    func testToggleTaskItemCheckedFlipsTheContainingTaskItemAttr() throws {
+        var state = EditorState(document: Document(.doc([
+            .taskList([.taskItem(checked: false, [.paragraph([.text("todo")])])]),
+        ])), selection: TextSelection(anchor: 4, head: 4))
+
+        XCTAssertTrue(try Commands.toggleTaskItemChecked().run(in: &state))
+        XCTAssertEqual(state.document.root.content[0].content[0].attrs["checked"], .bool(true))
+
+        XCTAssertTrue(try Commands.toggleTaskItemChecked().run(in: &state))
+        XCTAssertEqual(state.document.root.content[0].content[0].attrs["checked"], .bool(false))
+    }
+
     func testSetLinkWrapsSelectionInLinkMark() throws {
         var state = EditorState(document: Document(.doc([
             .paragraph([.text("hello")]),

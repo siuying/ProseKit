@@ -19,6 +19,7 @@ enum NodeRules {
     static let all: [any NodeRule] = [
         DocRule(), ParagraphRule(), HeadingRule(), BlockquoteRule(),
         BulletListRule(), OrderedListRule(), ListItemRule(),
+        TaskListRule(), TaskItemRule(),
     ]
 
     static func rule(for type: String) -> (any NodeRule)? {

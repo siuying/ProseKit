@@ -98,6 +98,8 @@ import UIKit
                 context.fillEllipse(in: rect)
                 context.restoreGState()
             }
+        case "taskItem":
+            drawTaskCheckbox(for: box, in: context, flippedAbout: flipHeight)
         default:
             break
         }
@@ -120,6 +122,28 @@ import UIKit
         context.saveGState()
         context.textPosition = CGPoint(x: box.frame.minX + 20 - width, y: flipHeight - lineCenter + 6)
         CTLineDraw(line, context)
+        context.restoreGState()
+    }
+
+    private func drawTaskCheckbox(for box: LayoutBox, in context: CGContext, flippedAbout flipHeight: CGFloat) {
+        let size: CGFloat = 13
+        let lineCenter = box.frame.minY + firstLineCenterOffset(in: box)
+        let rect = CGRect(
+            x: box.frame.minX + 6,
+            y: flipHeight - lineCenter - size / 2,
+            width: size,
+            height: size
+        )
+        context.saveGState()
+        context.setStrokeColor(UIColor.label.cgColor)
+        context.setLineWidth(1.4)
+        context.stroke(rect)
+        if box.node.attrs["checked"]?.boolValue == true {
+            context.move(to: CGPoint(x: rect.minX + 3, y: rect.midY))
+            context.addLine(to: CGPoint(x: rect.midX - 1, y: rect.maxY - 3))
+            context.addLine(to: CGPoint(x: rect.maxX - 2, y: rect.minY + 3))
+            context.strokePath()
+        }
         context.restoreGState()
     }
 

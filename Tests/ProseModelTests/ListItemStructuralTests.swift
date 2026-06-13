@@ -110,4 +110,24 @@ final class ListItemStructuralTests: XCTestCase {
         let restored = try inverse.apply(to: lifted).document
         XCTAssertEqual(restored, document)
     }
+
+    func testTaskItemAttrsSurviveSplitSinkAndLift() throws {
+        let document = Document(.doc([
+            .taskList([
+                .taskItem(checked: true, [.paragraph([.text("ab")])]),
+                .taskItem(checked: false, [.paragraph([.text("cd")])]),
+            ]),
+        ]))
+        let split = try SplitListItemStep(at: 5).apply(to: document).document
+        XCTAssertEqual(split.root.content[0].content[0].attrs["checked"], .bool(true))
+        XCTAssertEqual(split.root.content[0].content[1].attrs["checked"], .bool(true))
+
+        let sunk = try SinkListItemStep(at: 10).apply(to: document).document
+        let nested = sunk.root.content[0].content[0].content[1]
+        XCTAssertEqual(nested.type, "taskList")
+        XCTAssertEqual(nested.content[0].attrs["checked"], .bool(false))
+
+        let lifted = try LiftNestedListItemStep(at: 10).apply(to: sunk).document
+        XCTAssertEqual(lifted.root.content[0].content.map { $0.attrs["checked"] }, [.bool(true), .bool(false)])
+    }
 }

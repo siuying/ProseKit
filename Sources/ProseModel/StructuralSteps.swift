@@ -53,7 +53,19 @@ private func nodeStart(atPath path: [Int], in document: Document) -> Position? {
 }
 
 private func isListType(_ type: String) -> Bool {
-    type == "bulletList" || type == "orderedList"
+    type == "bulletList" || type == "orderedList" || type == "taskList"
+}
+
+private func isListItemType(_ type: String) -> Bool {
+    type == "listItem" || type == "taskItem"
+}
+
+private func itemType(forListType type: String) -> String {
+    type == "taskList" ? "taskItem" : "listItem"
+}
+
+private func listType(_ listType: String, acceptsItemType candidate: String) -> Bool {
+    candidate == itemType(forListType: listType)
 }
 
 /// Splits the text block containing `at` into two blocks at that Position.
@@ -111,7 +123,7 @@ public struct SplitListItemStep: Step, Codable, Equatable, Sendable {
         let itemIndex = itemPath.last ?? 0
         let item = document.node(atPath: itemPath)
         let list = document.node(atPath: listPath)
-        guard item.type == "listItem", isListType(list.type) else {
+        guard isListItemType(item.type), isListType(list.type), listType(list.type, acceptsItemType: item.type) else {
             throw StepError.unsupportedReplacement("splitListItem requires a list item")
         }
 
@@ -170,7 +182,7 @@ public struct JoinListItemsStep: Step, Codable, Equatable, Sendable {
         let itemIndex = itemPath.last ?? 0
         let item = document.node(atPath: itemPath)
         let list = document.node(atPath: listPath)
-        guard item.type == "listItem", isListType(list.type), blockIndex == 0, itemIndex > 0 else {
+        guard isListItemType(item.type), isListType(list.type), listType(list.type, acceptsItemType: item.type), blockIndex == 0, itemIndex > 0 else {
             throw StepError.unsupportedReplacement("joinListItems requires a non-first list item")
         }
 
@@ -232,7 +244,7 @@ public struct LiftListItemStep: Step, Codable, Equatable, Sendable {
         let itemIndex = itemPath.last ?? 0
         let item = document.node(atPath: itemPath)
         let list = document.node(atPath: listPath)
-        guard item.type == "listItem", isListType(list.type), blockIndex == 0 else {
+        guard isListItemType(item.type), isListType(list.type), listType(list.type, acceptsItemType: item.type), blockIndex == 0 else {
             throw StepError.unsupportedReplacement("liftListItem requires a list item")
         }
 
@@ -270,7 +282,7 @@ public struct LiftListItemStep: Step, Codable, Equatable, Sendable {
         let itemIndex = itemPath.last ?? 0
         let item = document.node(atPath: itemPath)
         let list = document.node(atPath: listPath)
-        guard item.type == "listItem", isListType(list.type) else {
+        guard isListItemType(item.type), isListType(list.type), listType(list.type, acceptsItemType: item.type) else {
             throw StepError.unsupportedReplacement("liftListItem requires a list item")
         }
         let preceding = itemIndex > 0
@@ -283,6 +295,7 @@ public struct LiftListItemStep: Step, Codable, Equatable, Sendable {
             blockCount: item.content.count,
             listType: list.type,
             listAttrs: list.attrs,
+            itemType: item.type,
             itemAttrs: item.attrs,
             mergeWithPreviousList: preceding,
             mergeWithNextList: following
@@ -303,6 +316,7 @@ public struct WrapLiftedListItemStep: Step, Codable, Equatable, Sendable {
     public var blockCount: Int
     public var listType: String
     public var listAttrs: [String: JSONValue]
+    public var itemType: String
     public var itemAttrs: [String: JSONValue]
     public var mergeWithPreviousList: Bool
     public var mergeWithNextList: Bool
@@ -312,6 +326,7 @@ public struct WrapLiftedListItemStep: Step, Codable, Equatable, Sendable {
         blockCount: Int,
         listType: String = "bulletList",
         listAttrs: [String: JSONValue] = [:],
+        itemType: String = "listItem",
         itemAttrs: [String: JSONValue] = [:],
         mergeWithPreviousList: Bool,
         mergeWithNextList: Bool
@@ -320,6 +335,7 @@ public struct WrapLiftedListItemStep: Step, Codable, Equatable, Sendable {
         self.blockCount = blockCount
         self.listType = listType
         self.listAttrs = listAttrs
+        self.itemType = itemType
         self.itemAttrs = itemAttrs
         self.mergeWithPreviousList = mergeWithPreviousList
         self.mergeWithNextList = mergeWithNextList
@@ -350,7 +366,7 @@ public struct WrapLiftedListItemStep: Step, Codable, Equatable, Sendable {
             items.append(contentsOf: parent.content[firstBlockIndex - 1].content)
         }
 
-        items.append(Node(type: "listItem", attrs: itemAttrs, content: liftedBlocks))
+        items.append(Node(type: itemType, attrs: itemAttrs, content: liftedBlocks))
 
         if mergeWithNextList {
             guard rangeEnd < parent.content.count, parent.content[rangeEnd].type == listType else {
@@ -402,7 +418,7 @@ public struct SinkListItemStep: Step, Codable, Equatable, Sendable {
         let itemIndex = itemPath.last ?? 0
         let item = document.node(atPath: itemPath)
         let list = document.node(atPath: listPath)
-        guard item.type == "listItem", isListType(list.type), blockIndex == 0, itemIndex > 0 else {
+        guard isListItemType(item.type), isListType(list.type), listType(list.type, acceptsItemType: item.type), blockIndex == 0, itemIndex > 0 else {
             throw StepError.unsupportedReplacement("sinkListItem requires a non-first list item")
         }
 
@@ -463,10 +479,12 @@ public struct LiftNestedListItemStep: Step, Codable, Equatable, Sendable {
         let nestedList = document.node(atPath: nestedListPath)
         let parentItem = document.node(atPath: parentItemPath)
         let parentList = document.node(atPath: parentListPath)
-        guard item.type == "listItem",
+        guard isListItemType(item.type),
               isListType(nestedList.type),
-              parentItem.type == "listItem",
+              listType(nestedList.type, acceptsItemType: item.type),
+              isListItemType(parentItem.type),
               isListType(parentList.type),
+              listType(parentList.type, acceptsItemType: parentItem.type),
               blockIndex == 0 else {
             throw StepError.unsupportedReplacement("liftNestedListItem requires a nested list item")
         }
@@ -649,6 +667,56 @@ public struct SetTextAlignStep: Step, Codable, Equatable, Sendable {
 
     public func inverted(in document: Document) throws -> any Step {
         SetTextAlignStep(at: at, value: document.blockInfo(containing: at)?.node.attrs["textAlign"]?.stringValue)
+    }
+
+    public func map(_ position: Position) -> Position {
+        position
+    }
+}
+
+/// Sets the `checked` Attr on the task item containing `at`. Attrs carry no
+/// size, so Positions are stable.
+public struct SetTaskItemCheckedStep: Step, Codable, Equatable, Sendable {
+    public var at: Position
+    public var checked: Bool
+
+    public init(at: Position, checked: Bool) {
+        self.at = at
+        self.checked = checked
+    }
+
+    public func apply(to document: Document) throws -> StepApplication {
+        guard let info = document.blockInfo(containing: at),
+              info.path.count >= 3 else {
+            throw StepError.unsupportedReplacement("task checked applies to task items")
+        }
+        let itemPath = Array(info.path.dropLast())
+        let listPath = Array(itemPath.dropLast())
+        let itemIndex = itemPath.last ?? 0
+        var item = document.node(atPath: itemPath)
+        let list = document.node(atPath: listPath)
+        guard item.type == "taskItem", list.type == "taskList" else {
+            throw StepError.unsupportedReplacement("task checked applies to task items")
+        }
+        item.attrs["checked"] = .bool(checked)
+        let itemStart = nodeStart(atPath: itemPath, in: document) ?? info.start
+        return StepApplication(
+            document: document.replacingBlocks(
+                at: listPath,
+                childRange: itemIndex..<(itemIndex + 1),
+                with: [item]
+            ),
+            changedRange: itemStart..<(itemStart + item.nodeSize)
+        )
+    }
+
+    public func inverted(in document: Document) throws -> any Step {
+        guard let info = document.blockInfo(containing: at),
+              info.path.count >= 3 else {
+            throw StepError.unsupportedReplacement("task checked applies to task items")
+        }
+        let item = document.node(atPath: Array(info.path.dropLast()))
+        return SetTaskItemCheckedStep(at: at, checked: item.attrs["checked"]?.boolValue ?? false)
     }
 
     public func map(_ position: Position) -> Position {

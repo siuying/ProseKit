@@ -46,6 +46,9 @@ import UIKit
         let textInteraction = UITextInteraction(for: .editable)
         textInteraction.textInput = self
         addInteraction(textInteraction)
+        let checkboxTap = UITapGestureRecognizer(target: self, action: #selector(taskCheckboxTapped(_:)))
+        checkboxTap.cancelsTouchesInView = false
+        addGestureRecognizer(checkboxTap)
         // Caret-follow is built in, so keyboard avoidance must be too —
         // otherwise revealing the caret can park it under the keyboard.
         NotificationCenter.default.addObserver(
@@ -380,12 +383,60 @@ import UIKit
     public func setBlockType(headingLevel level: Int?) { runCommand(Commands.setBlockType(headingLevel: level)) }
     public func sinkListItem() { runCommand(Commands.sinkListItem()) }
     public func liftListItem() { runCommand(Commands.liftListItem()) }
+    public func toggleTaskItemChecked() { runCommand(Commands.toggleTaskItemChecked()) }
 
     // MARK: - Active state (toolbar binding)
 
     public func isActive(_ mark: Mark) -> Bool { state.isActive(mark) }
     public var activeBlockType: String { state.activeBlockType }
     public var activeHeadingLevel: Int? { state.activeHeadingLevel }
+
+    @objc private func taskCheckboxTapped(_ gesture: UITapGestureRecognizer) {
+        guard gesture.state == .ended,
+              let position = taskCheckboxPosition(at: gesture.location(in: self)) else {
+            return
+        }
+        state = EditorState(
+            document: state.document,
+            selection: TextSelection(anchor: position, head: position),
+            lastTransaction: state.lastTransaction,
+            typingMarks: state.typingMarks
+        )
+        toggleTaskItemChecked()
+    }
+
+    func taskCheckboxPosition(at viewportPoint: CGPoint) -> Position? {
+        guard let layoutBox else { return nil }
+        let point = CGPoint(x: viewportPoint.x + contentOffset.x, y: viewportPoint.y + contentOffset.y)
+
+        func visit(_ box: LayoutBox) -> Position? {
+            if box.node.type == "taskItem" {
+                let size: CGFloat = 13
+                let lineCenter = box.frame.minY + taskFirstLineCenterOffset(in: box)
+                let rect = CGRect(x: box.frame.minX + 6, y: lineCenter - size / 2, width: size, height: size).insetBy(dx: -6, dy: -6)
+                if rect.contains(point), let firstLeaf = box.leaves.first {
+                    return firstLeaf.positionRange.lowerBound + 1
+                }
+            }
+            for child in box.children {
+                if let position = visit(child) { return position }
+            }
+            return nil
+        }
+
+        return visit(layoutBox)
+    }
+
+    private func taskFirstLineCenterOffset(in box: LayoutBox) -> CGFloat {
+        var node = box
+        var offset: CGFloat = 0
+        while node.kind == .container, let first = node.children.first {
+            offset += first.frame.minY - node.frame.minY
+            node = first
+        }
+        let lineHeight = node.lineFragments.first?.frame.height ?? 20
+        return offset + lineHeight / 2
+    }
 
     /// Called after any edit or selection change so a host toolbar can refresh
     /// its active-state highlighting.

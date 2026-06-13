@@ -99,6 +99,18 @@ final class ProseViewTests: XCTestCase {
         XCTAssertEqual(interaction?.textInput === view, true)
     }
 
+    func testTaskCheckboxHitTestReturnsTaskItemTextStart() throws {
+        let view = makeView(Document(.doc([
+            .taskList([.taskItem(checked: false, [.paragraph([.text("todo")])])]),
+        ])))
+        let item = view.layoutBox!.children[0].children[0]
+        let paragraph = item.children[0]
+        let lineHeight = paragraph.lineFragments.first!.frame.height
+        let point = CGPoint(x: item.frame.minX + 12, y: paragraph.frame.minY + lineHeight / 2)
+
+        XCTAssertEqual(view.taskCheckboxPosition(at: point), 4)
+    }
+
     func testCopyPutsSelectedPlainTextOnPasteboard() throws {
         let view = makeView(Document(.doc([.paragraph([.text("hello world")])])))
         let pasteboard = UIPasteboard.withUniqueName()

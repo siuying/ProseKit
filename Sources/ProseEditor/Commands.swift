@@ -17,7 +17,15 @@ public struct Command: Sendable {
 /// applies Steps; it never chooses.
 public enum Commands {
     private static func isListType(_ type: String) -> Bool {
-        type == "bulletList" || type == "orderedList"
+        type == "bulletList" || type == "orderedList" || type == "taskList"
+    }
+
+    private static func itemType(forListType type: String) -> String {
+        type == "taskList" ? "taskItem" : "listItem"
+    }
+
+    private static func listType(_ listType: String, acceptsItemType itemType: String) -> Bool {
+        itemType == self.itemType(forListType: listType)
     }
 
     public static func splitBlock() -> Command {
@@ -30,7 +38,7 @@ public enum Commands {
                 let listPath = Array(itemPath.dropLast())
                 let item = state.document.node(atPath: itemPath)
                 let list = state.document.node(atPath: listPath)
-                if item.type == "listItem", isListType(list.type) {
+                if listType(list.type, acceptsItemType: item.type), isListType(list.type) {
                     step = info.node.plainText.isEmpty && state.selection.head == info.start + 1
                         ? LiftListItemStep(at: state.selection.head)
                         : SplitListItemStep(at: state.selection.head)
@@ -63,7 +71,7 @@ public enum Commands {
                 let listPath = Array(itemPath.dropLast())
                 let item = state.document.node(atPath: itemPath)
                 let list = state.document.node(atPath: listPath)
-                if item.type == "listItem", isListType(list.type),
+                if listType(list.type, acceptsItemType: item.type), isListType(list.type),
                    (itemPath.last ?? 0) > 0, (info.path.last ?? 0) == 0 {
                     step = JoinListItemsStep(at: state.selection.head)
                 } else if state.document.canJoinBackward(at: state.selection.head) {
@@ -102,11 +110,11 @@ public enum Commands {
             let step: any Step
             if container.type == "blockquote" {
                 step = LiftStep(blockRange: info.start..<(info.start + info.node.nodeSize))
-            } else if container.type == "listItem", info.path.count >= 3 {
+            } else if (container.type == "listItem" || container.type == "taskItem"), info.path.count >= 3 {
                 let itemPath = Array(info.path.dropLast())
                 let listPath = Array(itemPath.dropLast())
                 let list = state.document.node(atPath: listPath)
-                guard isListType(list.type), (itemPath.last ?? 0) == 0 else { return false }
+                guard isListType(list.type), listType(list.type, acceptsItemType: container.type), (itemPath.last ?? 0) == 0 else { return false }
                 step = LiftListItemStep(at: state.selection.head)
             } else {
                 return false
@@ -133,7 +141,7 @@ public enum Commands {
             let listPath = Array(itemPath.dropLast())
             let item = state.document.node(atPath: itemPath)
             let list = state.document.node(atPath: listPath)
-            guard item.type == "listItem", isListType(list.type), (itemPath.last ?? 0) > 0 else {
+            guard isListType(list.type), listType(list.type, acceptsItemType: item.type), (itemPath.last ?? 0) > 0 else {
                 return false
             }
             let step = SinkListItemStep(at: state.selection.head)
@@ -159,7 +167,7 @@ public enum Commands {
             let listPath = Array(itemPath.dropLast())
             let item = state.document.node(atPath: itemPath)
             let list = state.document.node(atPath: listPath)
-            guard item.type == "listItem", isListType(list.type) else { return false }
+            guard isListType(list.type), listType(list.type, acceptsItemType: item.type) else { return false }
             let step: any Step
             if info.path.count >= 5 {
                 step = LiftNestedListItemStep(at: state.selection.head)
@@ -217,6 +225,20 @@ public enum Commands {
     public static func setTextAlign(_ value: String?) -> Command {
         Command { state in
             try dispatchCollapsing(SetTextAlignStep(at: state.selection.head, value: value), in: &state)
+            return true
+        }
+    }
+
+    public static func toggleTaskItemChecked() -> Command {
+        Command { state in
+            guard let info = state.document.blockInfo(containing: state.selection.head),
+                  info.path.count >= 3 else {
+                return false
+            }
+            let item = state.document.node(atPath: Array(info.path.dropLast()))
+            guard item.type == "taskItem" else { return false }
+            let next = !(item.attrs["checked"]?.boolValue ?? false)
+            try dispatchCollapsing(SetTaskItemCheckedStep(at: state.selection.head, checked: next), in: &state)
             return true
         }
     }
