@@ -44,14 +44,27 @@ a quote.
 **2. Positions are unchanged; the derived index generalizes to a leaf-block
 tiling.** ProseMirror Positions already count every node boundary at any depth,
 so the addressing scheme needs no change. What changes is `BlockIndex`: instead
-of tiling the top-level blocks, it tiles the **leaf blocks** — the units CoreText
-typesets — in document order, each with its absolute Position range, character
-offset, and the container chain (the ancestors needed for indent and decoration).
-Leaf blocks still tile the text-Position space contiguously, so position-↔-block
-lookup stays a binary search and keystrokes stay O(log leaves), preserving the
-invariant the editing-performance work established (see
-`.scratch/editing-performance/issues/07`). The container chain is carried
-alongside each leaf, not searched.
+of tiling the top-level blocks, it enumerates the **leaf blocks** — the units
+CoreText typesets — in document order, each carrying its absolute text-Position
+range, character offset, and a **path** (`[Int]` child indices from the root).
+The container nodes and any decoration data (indent depth, list ordinal, quote
+nesting) are recovered by walking `root` + path on demand — never duplicated into
+the index. Leaf blocks occupy **ordered, disjoint, monotonic** text-Position
+ranges (*not* a contiguous tiling: container open/close tokens sit in the gaps
+between leaves, and a Position in a gap is structural — handled by each Step's
+`map`, with the caret clamping over it). Position-↔-leaf lookup therefore stays a
+binary search and keystrokes stay O(log leaves), preserving the invariant the
+editing-performance work established (see
+`.scratch/editing-performance/issues/07`).
+
+This is faithful to ProseMirror, which has **no** precomputed leaf index: it
+resolves positions on demand against the persistent tree (`ResolvedPos` — a
+per-depth `[node, index, start]` path) behind a small (12-slot) resolution cache,
+leaning on the browser for layout. `BlockIndex` is an additive optimization our
+CoreText engine needs (every leaf must be typeset; the UITextInput hot path needs
+O(log) Position↔leaf). The path-only payload keeps the document tree the single
+position authority — indices stored, nodes recovered by walking — so we do not
+fork ProseMirror's model, only cache an ordering over it.
 
 **3. The layout tree becomes genuinely nested.** `IncrementalLayoutStore` emits
 container Layout Boxes that stack child boxes and draw decorations (indent bars,
