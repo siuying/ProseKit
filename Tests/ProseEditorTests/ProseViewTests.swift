@@ -91,6 +91,21 @@ final class ProseViewTests: XCTestCase {
         XCTAssertEqual(spy.events, [.selectionWillChange, .selectionDidChange])
     }
 
+    func testMovingTheSelectionDoesNotRepaintTheCanvas() throws {
+        let view = makeView(Document(.doc([.paragraph([.text("hello world")])])))
+        view.layoutIfNeeded()
+        // Consume the layout pass's repaint so the flag starts clean.
+        view.canvas.layer.displayIfNeeded()
+        XCTAssertFalse(view.canvas.layer.needsDisplay(), "precondition: canvas should be clean before the selection change")
+
+        view.selectedTextRange = ProseTextRange(anchor: 2, head: 7)
+
+        XCTAssertFalse(
+            view.canvas.layer.needsDisplay(),
+            "selection changes draw no canvas pixels — the system draws the caret/selection — so they must not invalidate the Canvas"
+        )
+    }
+
     func testEditableTextInteractionOwnsSelectionUX() throws {
         let view = makeView(Document(.doc([.paragraph([.text("hello world")])])))
         let interaction = view.interactions.compactMap { $0 as? UITextInteraction }.first
