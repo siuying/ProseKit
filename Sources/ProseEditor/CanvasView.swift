@@ -149,11 +149,13 @@ import UIKit
         ]
         let line = CTLineCreateWithAttributedString(NSAttributedString(string: marker, attributes: attributes))
         let width = CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
-        let lineCenter = box.frame.minY + firstLineCenterOffset(in: box)
+        // CTLineDraw places the line on its baseline, so align the marker to the
+        // item text's baseline rather than its visual centre.
+        let baseline = box.frame.minY + firstLineBaselineOffset(in: box)
         context.saveGState()
         context.textPosition = CGPoint(
             x: Self.orderedMarkerOriginX(markerWidth: width, itemMinX: box.frame.minX),
-            y: flipHeight - lineCenter + 6
+            y: flipHeight - baseline
         )
         CTLineDraw(line, context)
         context.restoreGState()
@@ -271,6 +273,24 @@ import UIKit
         }
         let lineHeight = node.lineFragments.first?.frame.height ?? 20
         return offset + lineHeight / 2
+    }
+
+    /// The text baseline of a container's first line, relative to the
+    /// container's top — descends to the first leaf's first fragment so a
+    /// marker's baseline aligns with the text even when the first block is a
+    /// heading.
+    private func firstLineBaselineOffset(in box: LayoutBox) -> CGFloat {
+        var node = box
+        var offset: CGFloat = 0
+        while node.kind == .container, let first = node.children.first {
+            offset += first.frame.minY - node.frame.minY
+            node = first
+        }
+        let fragment = node.lineFragments.first
+        // Fall back to a typical ascent (~80% of line height) when the fragment
+        // carries no typeset line (e.g. an empty block).
+        let ascent = fragment?.typesetLine?.ascent ?? ((fragment?.frame.height ?? 20) * 0.8)
+        return offset + (fragment?.frame.minY ?? 0) + ascent
     }
 
     /// The content-space region an edit can have moved: the changed blocks'
