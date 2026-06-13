@@ -106,6 +106,13 @@ private struct Demo: Identifiable, Hashable {
             makeDocument: { .nesting }
         ),
         Demo(
+            id: "list",
+            title: "Bullet List",
+            subtitle: "A bullet list: nested bulletList → listItem → paragraph with disc markers",
+            icon: "list.bullet",
+            makeDocument: { .bulletList }
+        ),
+        Demo(
             id: "large",
             title: "Large Document",
             subtitle: "2,000 paragraphs: fling scrolling, keyboard avoidance, responsive typing",
@@ -502,6 +509,17 @@ extension Document {
             .paragraph([.text("So does this one — two quoted paragraphs, one container.")]),
         ]),
         .paragraph([.text("And this paragraph is back at the top level, below the quote.")]),
+    ]))
+
+    fileprivate static let bulletList = Document(.doc([
+        .heading(level: 1, [.text("Bullet List")]),
+        .paragraph([.text("A bullet list is two levels of container — a bulletList of listItems, each holding a paragraph:")]),
+        .bulletList([
+            .listItem([.paragraph([.text("First item in the list.")])]),
+            .listItem([.paragraph([.text("Second item, a little longer so it shows the marker stays put.")])]),
+            .listItem([.paragraph([.text("Third and final item.")])]),
+        ]),
+        .paragraph([.text("And a plain paragraph back at the top level below the list.")]),
     ]))
 
     fileprivate static let structure = Document(.doc([

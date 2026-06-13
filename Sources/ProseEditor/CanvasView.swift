@@ -71,17 +71,46 @@ import UIKit
     /// height like the glyphs). Slice 01: the blockquote's vertical rule down
     /// its indent band.
     private func drawContainerDecoration(_ box: LayoutBox, in context: CGContext, flippedAbout flipHeight: CGFloat) {
-        guard box.node.type == "blockquote" else { return }
-        let rule = CGRect(
-            x: box.frame.minX + 6,
-            y: flipHeight - box.frame.maxY,
-            width: 4,
-            height: box.frame.height
-        )
-        context.saveGState()
-        context.setFillColor(UIColor.systemGray3.cgColor)
-        context.fill(rule)
-        context.restoreGState()
+        switch box.node.type {
+        case "blockquote":
+            let rule = CGRect(
+                x: box.frame.minX + 6,
+                y: flipHeight - box.frame.maxY,
+                width: 4,
+                height: box.frame.height
+            )
+            context.saveGState()
+            context.setFillColor(UIColor.systemGray3.cgColor)
+            context.fill(rule)
+            context.restoreGState()
+        case "listItem":
+            // A bullet disc centred on the item's first line, in the indent band
+            // to the left of the text.
+            let radius: CGFloat = 2.75
+            let lineCenter = box.frame.minY + firstLineCenterOffset(in: box)
+            let center = CGPoint(x: box.frame.minX + 12, y: flipHeight - lineCenter)
+            let rect = CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
+            context.saveGState()
+            context.setFillColor(UIColor.label.cgColor)
+            context.fillEllipse(in: rect)
+            context.restoreGState()
+        default:
+            break
+        }
+    }
+
+    /// The vertical centre of a container's first line, relative to the
+    /// container's top — descends to the first leaf's first fragment so a marker
+    /// aligns with the text even when the first block is a heading.
+    private func firstLineCenterOffset(in box: LayoutBox) -> CGFloat {
+        var node = box
+        var offset: CGFloat = 0
+        while node.kind == .container, let first = node.children.first {
+            offset += first.frame.minY - node.frame.minY
+            node = first
+        }
+        let lineHeight = node.lineFragments.first?.frame.height ?? 20
+        return offset + lineHeight / 2
     }
 
     /// The content-space region an edit can have moved: the changed blocks'
