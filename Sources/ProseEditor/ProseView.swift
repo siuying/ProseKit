@@ -304,6 +304,12 @@ import UIKit
         }
     }
 
+    private func refreshSelectionDisplayGeometry() {
+        for case let display as UITextSelectionDisplayInteraction in interactions {
+            display.setNeedsSelectionUpdate()
+        }
+    }
+
     // MARK: - Editing
 
     public var hasText: Bool {
@@ -365,7 +371,10 @@ import UIKit
     func runCommand(_ command: Command) {
         // A command that didn't dispatch leaves a stale lastTransaction;
         // its dirty rect repaints an already-clean region, never too little.
+        inputDelegate?.selectionWillChange(self)
         performEdit { _ = try command.run(in: &state) }
+        refreshSelectionDisplayGeometry()
+        inputDelegate?.selectionDidChange(self)
     }
 
     /// Clamps a Position to the Document's text range.

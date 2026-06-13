@@ -231,6 +231,17 @@ final class CommandTests: XCTestCase {
         XCTAssertEqual(state.document.root.content[0].type, "paragraph")
     }
 
+    func testSetBlockTypePreservesSelectionRange() throws {
+        var state = EditorState(document: Document(.doc([
+            .paragraph([.text("hello world")]),
+        ])), selection: TextSelection(anchor: 2, head: 7))
+
+        XCTAssertTrue(try Commands.setBlockType(headingLevel: 1).run(in: &state))
+
+        XCTAssertEqual(state.document.root.content[0].type, "heading")
+        XCTAssertEqual(state.selection, TextSelection(anchor: 2, head: 7))
+    }
+
     func testSetTextAlignSetsAndClearsBlockAttr() throws {
         var state = EditorState(document: Document(.doc([
             .paragraph([.text("hello")]),
