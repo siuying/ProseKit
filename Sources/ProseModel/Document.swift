@@ -1,21 +1,32 @@
 public struct Document: Codable, Hashable, Sendable {
     public private(set) var root: Node
 
-    /// Per-block position and character arithmetic is precomputed once per
-    /// Document. Documents are immutable — editing produces a new Document —
-    /// so the index cannot go stale, and the paths UIKit hammers between
-    /// keystrokes (text(in:), offset math, blockInfo) stay O(log blocks)
-    /// instead of re-walking the tree per call.
+    /// The leaf-block tiling (ADR 0007): the document's **leaf blocks**
+    /// (textblocks — the units CoreText typesets) enumerated in document order,
+    /// at any nesting depth. Precomputed once per Document; Documents are
+    /// immutable, so the index cannot go stale, and the paths UIKit hammers
+    /// between keystrokes (text(in:), offset math, blockInfo) stay a binary
+    /// search instead of re-walking the tree per call.
+    ///
+    /// The arrays are parallel, one entry per leaf in order. The tree is the
+    /// single authority: a leaf's containers are recovered by walking
+    /// `root` + its `leafPath`, never duplicated here (parity with ProseMirror,
+    /// which has no leaf index at all).
     struct BlockIndex: Hashable, Sendable {
-        /// blockStarts[i] is the Position of block i's opening token.
+        /// blockStarts[i] is the Position of leaf i's opening token.
         var blockStarts: [Position]
-        /// blockTextCounts[i] is block i's plainText character count.
+        /// blockTextCounts[i] is leaf i's plainText character count.
         var blockTextCounts: [Int]
-        /// blockCharStarts[i] is the sum of plainText counts before block i.
+        /// blockCharStarts[i] is the sum of plainText counts before leaf i.
         var blockCharStarts: [Int]
-        /// Position just past the last block (root.nodeSize - 1).
+        /// leafPaths[i] is the child-index path from the root to leaf i.
+        var leafPaths: [[Int]]
+        /// Position just past the last top-level child (root.nodeSize - 1).
         var endPosition: Position
         var endTextPosition: Position
+        /// True when every leaf is a direct child of the root (depth 1) — the
+        /// fast path for incremental index derivation (`derivedIndex`).
+        var isFlat: Bool
     }
 
     var index: BlockIndex
@@ -47,23 +58,39 @@ public struct Document: Codable, Hashable, Sendable {
         index.endTextPosition
     }
 
+    /// Depth-first enumeration of the root's leaf blocks. Each container
+    /// contributes one Position for its opening token, then its children, then
+    /// one for its closing token — so leaf Positions account for every ancestor
+    /// boundary. For a flat document this produces exactly the top-level tiling.
     private static func makeIndex(of root: Node) -> BlockIndex {
         var starts: [Position] = []
         var textCounts: [Int] = []
         var charStarts: [Int] = []
-        starts.reserveCapacity(root.content.count)
-        textCounts.reserveCapacity(root.content.count)
-        charStarts.reserveCapacity(root.content.count)
+        var leafPaths: [[Int]] = []
         var position: Position = 1
         var characters = 0
-        for block in root.content {
-            starts.append(position)
-            charStarts.append(characters)
-            let count = block.plainText.count
-            textCounts.append(count)
-            characters += count
-            position += block.nodeSize
+
+        func visit(_ node: Node, path: [Int]) {
+            if node.isTextblock {
+                starts.append(position)
+                charStarts.append(characters)
+                let count = node.plainText.count
+                textCounts.append(count)
+                leafPaths.append(path)
+                characters += count
+                position += node.nodeSize
+            } else {
+                position += 1 // container opening token
+                for (childIndex, child) in node.content.enumerated() {
+                    visit(child, path: path + [childIndex])
+                }
+                position += 1 // container closing token
+            }
         }
+        for (childIndex, child) in root.content.enumerated() {
+            visit(child, path: [childIndex])
+        }
+
         let endTextPosition: Position
         if let lastStart = starts.last, let lastCount = textCounts.last {
             endTextPosition = lastStart + 1 + lastCount
@@ -74,13 +101,26 @@ public struct Document: Codable, Hashable, Sendable {
             blockStarts: starts,
             blockTextCounts: textCounts,
             blockCharStarts: charStarts,
+            leafPaths: leafPaths,
             endPosition: position,
-            endTextPosition: endTextPosition
+            endTextPosition: endTextPosition,
+            isFlat: leafPaths.allSatisfy { $0.count == 1 }
         )
     }
 
+    /// The number of leaf blocks (textblocks), at any depth.
     public var blockCount: Int {
         index.blockStarts.count
+    }
+
+    /// The leaf block at leaf-order index `i`, fetched by walking its path. The
+    /// tree is the authority; the index stores only the path.
+    func leafNode(_ i: Int) -> Node {
+        var node = root
+        for childIndex in index.leafPaths[i] {
+            node = node.content[childIndex]
+        }
+        return node
     }
 
     /// Document with blocks[range] replaced by `newBlocks`. The index is
@@ -94,9 +134,18 @@ public struct Document: Codable, Hashable, Sendable {
     func replacingBlocks(in range: Range<Int>, with newBlocks: [Node]) -> Document {
         var blocks = root.content
         blocks.replaceSubrange(range, with: newBlocks)
+        let newRoot = root.withContent(blocks)
+        // Incremental derivation only holds when the document stays flat — every
+        // leaf a direct child of the root. A nested document (or one becoming
+        // nested) rebuilds the leaf tiling; making that incremental too is
+        // slice 02 (.scratch/block-nesting/issues/02). Flat editing — the
+        // keystroke hot path — keeps the O(blocks) derived update.
+        let staysFlat = index.isFlat && newBlocks.allSatisfy(\.isTextblock)
         return Document(
-            root: root.withContent(blocks),
-            index: derivedIndex(replacingBlocksIn: range, with: newBlocks)
+            root: newRoot,
+            index: staysFlat
+                ? derivedIndex(replacingBlocksIn: range, with: newBlocks)
+                : Self.makeIndex(of: newRoot)
         )
     }
 
@@ -142,6 +191,10 @@ public struct Document: Codable, Hashable, Sendable {
                 charStarts[tailIndex] += characterDelta
             }
         }
+        // Flat document: leaf i is the root's child i, so the path is simply
+        // [i]; reindex from the edit point on. (Only reached on the flat fast
+        // path — see replacingBlocks.)
+        let leafPaths = (0..<starts.count).map { [$0] }
 
         let endPosition = index.endPosition + positionDelta
         let endTextPosition: Position
@@ -154,8 +207,10 @@ public struct Document: Codable, Hashable, Sendable {
             blockStarts: starts,
             blockTextCounts: textCounts,
             blockCharStarts: charStarts,
+            leafPaths: leafPaths,
             endPosition: endPosition,
-            endTextPosition: endTextPosition
+            endTextPosition: endTextPosition,
+            isFlat: true
         )
     }
 
@@ -193,9 +248,11 @@ public struct Document: Codable, Hashable, Sendable {
         root.containsText(needle)
     }
 
-    /// Blocks tile the position space contiguously, so this is a binary
-    /// search. A block-boundary position (end of block i == start of block
-    /// i+1) belongs to block i, matching the original first-match scan.
+    /// The leaf block whose range contains `position`. Leaf opening Positions
+    /// are monotonic (though no longer contiguous — container tokens sit in the
+    /// gaps), so this is a binary search. A position exactly on a leaf's opening
+    /// token attributes to the previous leaf, matching the original scan.
+    /// `index` is the leaf-order index; `node` the leaf; `start` its open token.
     public func blockInfo(containing position: Position) -> BlockInfo? {
         let starts = index.blockStarts
         guard !starts.isEmpty, position >= starts[0], position <= index.endPosition else { return nil }
@@ -206,7 +263,7 @@ public struct Document: Codable, Hashable, Sendable {
             if starts[mid] <= position { low = mid } else { high = mid - 1 }
         }
         let blockIndex = (low > 0 && starts[low] == position) ? low - 1 : low
-        return BlockInfo(index: blockIndex, node: root.content[blockIndex], start: starts[blockIndex])
+        return BlockInfo(index: blockIndex, node: leafNode(blockIndex), start: starts[blockIndex])
     }
 
     /// Whether `position` is the first text position of a non-first block —

@@ -21,6 +21,14 @@ public struct Node: Codable, Hashable, Sendable {
 
     public var isText: Bool { type == "text" }
 
+    /// A *textblock* (ProseMirror's term): a non-text block whose children are
+    /// inline (text) — the leaf unit CoreText typesets, e.g. paragraph, heading,
+    /// code block. A container block (doc, blockquote, list, list item) holds
+    /// child blocks, so this is false. An empty block counts as a textblock.
+    public var isTextblock: Bool {
+        !isText && content.allSatisfy(\.isText)
+    }
+
     public var nodeSize: Int {
         if isText {
             return text?.count ?? 0
@@ -49,6 +57,10 @@ public struct Node: Codable, Hashable, Sendable {
 
     public static func text(_ text: String, marks: [Mark] = []) -> Node {
         Node(type: "text", text: text, marks: marks)
+    }
+
+    public static func blockquote(_ content: [Node]) -> Node {
+        Node(type: "blockquote", content: content)
     }
 
     public func withContent(_ content: [Node]) -> Node {

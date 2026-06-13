@@ -18,6 +18,16 @@ struct ProseExampleApp: App {
                 NavigationStack {
                     SimpleEditorScreen(demo: Demo.all.first { $0.id == "simple" }!)
                 }
+            } else if let demo = Self.deepLinkedDemo {
+                // `-demo <id>` deep-links to one demo for screenshots / review
+                // (simctl can't tap to navigate).
+                NavigationStack {
+                    if demo.id == "simple" {
+                        SimpleEditorScreen(demo: demo)
+                    } else {
+                        DemoEditorScreen(demo: demo)
+                    }
+                }
             } else {
                 DemoListView()
             }
@@ -29,6 +39,13 @@ struct ProseExampleApp: App {
               CommandLine.arguments.indices.contains(index + 1) else { return nil }
         return Int(CommandLine.arguments[index + 1])
     }()
+
+    private static var deepLinkedDemo: Demo? {
+        guard let index = CommandLine.arguments.firstIndex(of: "-demo"),
+              CommandLine.arguments.indices.contains(index + 1) else { return nil }
+        let id = CommandLine.arguments[index + 1]
+        return Demo.all.first { $0.id == id }
+    }
 }
 
 // MARK: - Demo catalog
@@ -80,6 +97,13 @@ private struct Demo: Identifiable, Hashable {
             subtitle: "Return splits a block, Backspace at the start joins it with the previous one",
             icon: "rectangle.split.3x1",
             makeDocument: { .structure }
+        ),
+        Demo(
+            id: "blockquote",
+            title: "Block Nesting",
+            subtitle: "A blockquote containing paragraphs — nested container layout with an indent rule",
+            icon: "text.quote",
+            makeDocument: { .nesting }
         ),
         Demo(
             id: "large",
@@ -469,6 +493,16 @@ extension Document {
             .paragraph([.text("Filler paragraph \(n). Keep dragging the selection handle toward the screen edge and watch the document scroll underneath it.")])
         }
     ))
+
+    fileprivate static let nesting = Document(.doc([
+        .heading(level: 1, [.text("Block Nesting")]),
+        .paragraph([.text("A blockquote is a container block: it holds other blocks and lays them out indented, with a rule down its left edge.")]),
+        .blockquote([
+            .paragraph([.text("This paragraph lives inside a blockquote.")]),
+            .paragraph([.text("So does this one — two quoted paragraphs, one container.")]),
+        ]),
+        .paragraph([.text("And this paragraph is back at the top level, below the quote.")]),
+    ]))
 
     fileprivate static let structure = Document(.doc([
         .heading(level: 1, [.text("Structural Editing")]),

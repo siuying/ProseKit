@@ -21,7 +21,7 @@ extension Document {
             let textStart = index.blockStarts[blockIndex] + 1
             let count = index.blockTextCounts[blockIndex]
             guard to >= textStart else { break }
-            let text = root.content[blockIndex].plainText
+            let text = leafNode(blockIndex).plainText
             let lower = max(from, textStart)
             let upper = min(to, textStart + count)
             let start = text.index(text.startIndex, offsetBy: lower - textStart)
