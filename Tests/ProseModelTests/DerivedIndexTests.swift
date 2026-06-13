@@ -45,18 +45,18 @@ final class DerivedIndexTests: XCTestCase {
     func testSplitBlockDerivesIndex() throws {
         for blockIndex in [0, 1, 3] {
             let position = document.position(ofTextInBlockAt: blockIndex)! + 2
-            let split = try document.splitBlock(at: position).document
+            let split = try SplitBlockStep(at: position).apply(to: document).document
             assertIndexMatchesRebuild(split, "split block \(blockIndex)")
         }
     }
 
     func testJoinBackwardDerivesIndex() throws {
         let mergeAt = document.position(ofTextInBlockAt: 1)!
-        let merged = try XCTUnwrap(document.joinBackward(at: mergeAt)).document
+        let merged = try JoinBlocksStep(at: mergeAt).apply(to: document).document
         assertIndexMatchesRebuild(merged, "merging join")
 
         let emptyAt = document.position(ofTextInBlockAt: 2)!
-        let removed = try XCTUnwrap(document.joinBackward(at: emptyAt)).document
+        let removed = try JoinBlocksStep(at: emptyAt).apply(to: document).document
         assertIndexMatchesRebuild(removed, "empty-block join")
     }
 
@@ -83,7 +83,7 @@ final class DerivedIndexTests: XCTestCase {
 
     func testEditingDownToAnEmptyDocumentDerivesIndex() throws {
         let single = Document(.doc([.paragraph([]), .paragraph([])]))
-        let joined = try XCTUnwrap(single.joinBackward(at: single.position(ofTextInBlockAt: 1)!)).document
+        let joined = try JoinBlocksStep(at: single.position(ofTextInBlockAt: 1)!).apply(to: single).document
         assertIndexMatchesRebuild(joined, "join down to one block")
     }
 }

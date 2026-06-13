@@ -1,3 +1,32 @@
+/// Splits the text block containing `position` at it into two blocks. The
+/// second block inherits the first's type and Attrs unless `blockType` /
+/// `blockAttrs` override it (how a join inverts back to the original block).
+/// Built on the block-replace primitive.
+private func splitBlock(
+    in document: Document,
+    at position: Position,
+    blockType: String?,
+    blockAttrs: [String: JSONValue]?
+) throws -> StepApplication {
+    guard let info = document.blockInfo(containing: position),
+          info.node.type == "paragraph" || info.node.type == "heading" else {
+        throw StepError.unsupportedReplacement("splitBlock requires a text block")
+    }
+    let textStart = info.start + 1
+    let offset = max(0, min(info.node.plainText.count, position - textStart))
+    let text = info.node.plainText
+    let splitIndex = text.index(text.startIndex, offsetBy: offset)
+    let first = info.node.withContent([.text(String(text[..<splitIndex]))])
+    let second = blockType
+        .map { Node(type: $0, attrs: blockAttrs ?? [:], content: [.text(String(text[splitIndex...]))]) }
+        ?? info.node.withContent([.text(String(text[splitIndex...]))])
+    let newBlockStart = info.start + first.nodeSize
+    return StepApplication(
+        document: document.replacingBlocks(in: info.index..<(info.index + 1), with: [first, second]),
+        changedRange: info.start..<(newBlockStart + second.nodeSize)
+    )
+}
+
 /// Splits the text block containing `at` into two blocks at that Position.
 /// The second block inherits the first's type and Attrs unless `blockType` /
 /// `blockAttrs` override it (how a join inverts back to the original block).
@@ -13,7 +42,7 @@ public struct SplitBlockStep: Step, Codable, Equatable, Sendable {
     }
 
     public func apply(to document: Document) throws -> StepApplication {
-        try document.splitBlock(at: at, blockType: blockType, blockAttrs: blockAttrs)
+        try splitBlock(in: document, at: at, blockType: blockType, blockAttrs: blockAttrs)
     }
 
     public func inverted(in document: Document) throws -> any Step {
@@ -29,6 +58,34 @@ public struct SplitBlockStep: Step, Codable, Equatable, Sendable {
     }
 }
 
+/// Joins the block whose first text position is `position` into the previous
+/// block: an empty block is removed, a non-empty one merges its runs into the
+/// predecessor (Marks preserved). Returns nil when `position` is not the start
+/// of a non-first block. Built on the block-replace primitive.
+private func joinBackward(in document: Document, at position: Position) -> StepApplication? {
+    guard let info = document.blockInfo(containing: position), info.index > 0, position == info.start + 1 else {
+        return nil
+    }
+    let previous = document.root.content[info.index - 1]
+    let current = document.root.content[info.index]
+    let previousTextEnd = info.start - 1
+
+    let joined: Document
+    if document.textCount(ofBlockAt: info.index) == 0 {
+        joined = document.replacingBlocks(in: info.index..<(info.index + 1), with: [])
+    } else {
+        // Concatenating the runs (not the plain text) keeps both blocks'
+        // Marks across the join, like ProseMirror.
+        let merged = previous.withContent(previous.content + current.content)
+        joined = document.replacingBlocks(in: (info.index - 1)..<(info.index + 1), with: [merged])
+    }
+
+    return StepApplication(
+        document: joined,
+        changedRange: previousTextEnd - previous.nodeSize + 1..<(previousTextEnd + current.nodeSize)
+    )
+}
+
 /// Joins the block whose first text position is `at` into the previous block:
 /// an empty block is removed, a non-empty one merges its text into the
 /// predecessor (what Backspace at a block start does).
@@ -40,7 +97,7 @@ public struct JoinBlocksStep: Step, Codable, Equatable, Sendable {
     }
 
     public func apply(to document: Document) throws -> StepApplication {
-        guard let application = document.joinBackward(at: at) else {
+        guard let application = joinBackward(in: document, at: at) else {
             throw StepError.unsupportedReplacement("joinBackward requires the start of a non-first block")
         }
         return application
