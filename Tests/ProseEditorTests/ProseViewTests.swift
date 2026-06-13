@@ -91,6 +91,24 @@ final class ProseViewTests: XCTestCase {
         XCTAssertEqual(spy.events, [.selectionWillChange, .selectionDidChange])
     }
 
+    func testBlockFormatCommandPreservesSelectionAndNotifiesInputDelegate() throws {
+        let view = makeView(Document(.doc([.paragraph([.text("hello world")])])))
+        view.selectedTextRange = ProseTextRange(anchor: 2, head: 7)
+        let spy = InputDelegateSpy()
+        view.inputDelegate = spy
+
+        view.setBlockType(headingLevel: 1)
+
+        XCTAssertEqual(view.document.root.content[0].type, "heading")
+        XCTAssertEqual(view.selectedTextRange as? ProseTextRange, ProseTextRange(anchor: 2, head: 7))
+        XCTAssertEqual(spy.events, [
+            .selectionWillChange,
+            .textWillChange,
+            .textDidChange,
+            .selectionDidChange,
+        ])
+    }
+
     func testMovingTheSelectionDoesNotRepaintTheCanvas() throws {
         let view = makeView(Document(.doc([.paragraph([.text("hello world")])])))
         view.layoutIfNeeded()

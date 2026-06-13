@@ -243,7 +243,7 @@ public enum Commands {
     /// `level` is nil — non-toggling, for a heading dropdown.
     public static func setBlockType(headingLevel level: Int?) -> Command {
         Command { state in
-            try dispatchCollapsing(SetBlockTypeStep(at: state.selection.head, headingLevel: level), in: &state)
+            try dispatchPreservingSelection(SetBlockTypeStep(at: state.selection.head, headingLevel: level), in: &state)
             return true
         }
     }
@@ -252,7 +252,7 @@ public enum Commands {
     /// slice 13). `nil`/`"left"` clears it.
     public static func setTextAlign(_ value: String?) -> Command {
         Command { state in
-            try dispatchCollapsing(SetTextAlignStep(at: state.selection.head, value: value), in: &state)
+            try dispatchPreservingSelection(SetTextAlignStep(at: state.selection.head, value: value), in: &state)
             return true
         }
     }
@@ -311,6 +311,20 @@ public enum Commands {
         try state.dispatch(Transaction(
             steps: [step],
             selection: TextSelection(anchor: head, head: head),
+            origin: .local
+        ))
+    }
+
+    /// Dispatches a single block-attribute Step while keeping the current
+    /// Selection range. The Step mapping still runs, so future structural
+    /// block steps can move the endpoints without callers knowing how.
+    private static func dispatchPreservingSelection(_ step: any Step, in state: inout EditorState) throws {
+        try state.dispatch(Transaction(
+            steps: [step],
+            selection: TextSelection(
+                anchor: step.map(state.selection.anchor),
+                head: step.map(state.selection.head)
+            ),
             origin: .local
         ))
     }

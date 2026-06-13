@@ -29,6 +29,17 @@ final class RenderingTests: XCTestCase {
         return image.pngData() ?? Data()
     }
 
+    private func render(_ view: ProseView, croppingTo rect: CGRect) -> Data {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: Self.size, format: format)
+        let image = renderer.image { context in
+            view.layer.render(in: context.cgContext)
+        }
+        guard let cropped = image.cgImage?.cropping(to: rect.integral) else { return Data() }
+        return UIImage(cgImage: cropped).pngData() ?? Data()
+    }
+
     private func assertRendersLikeFreshView(_ view: ProseView, _ message: String) {
         let fresh = makeView(view.document)
         // Edits reveal the caret, so the edited view may have scrolled; the
@@ -110,6 +121,23 @@ final class RenderingTests: XCTestCase {
         XCTAssertGreaterThan(headingHeight(1), headingHeight(2), "h1 is larger than h2")
         XCTAssertGreaterThan(headingHeight(2), headingHeight(3), "h2 is larger than h3")
         XCTAssertGreaterThan(headingHeight(3), headingHeight(4), "h3 is larger than h4")
+    }
+
+    func testCheckedTaskItemFadesAndStrikesText() {
+        func view(checked: Bool) -> ProseView {
+            makeView(Document(.doc([
+                .taskList([.taskItem(checked: checked, [.paragraph([.text("finish this task")])])]),
+            ])))
+        }
+        let unchecked = view(checked: false)
+        let checked = view(checked: true)
+        let textFrame = unchecked.layoutBox!.children[0].children[0].children[0].frame.insetBy(dx: -2, dy: -2)
+
+        XCTAssertNotEqual(
+            render(unchecked, croppingTo: textFrame),
+            render(checked, croppingTo: textFrame),
+            "checked task items must visually fade and strike the text, not only change the checkbox"
+        )
     }
 
     func testTypingMidBlockRendersLikeFreshView() {
