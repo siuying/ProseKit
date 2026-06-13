@@ -53,16 +53,32 @@ import UIKit
     /// Draws one box: a leaf typesets its line fragments; a container paints its
     /// decoration (the blockquote rule) then recurses into its children. Boxes
     /// outside the dirty region are skipped.
-    private func drawBox(_ box: LayoutBox, parent: LayoutBox?, in context: CGContext, contentRect: CGRect, flippedAbout flipHeight: CGFloat) {
+    private func drawBox(
+        _ box: LayoutBox,
+        parent: LayoutBox?,
+        in context: CGContext,
+        contentRect: CGRect,
+        flippedAbout flipHeight: CGFloat,
+        checkedTaskItem: Bool = false
+    ) {
         guard box.frame.intersects(contentRect) else { return }
         switch box.kind {
         case .leafBlock:
-            draw(block: box, in: context, flippedAbout: flipHeight)
+            draw(block: box, in: context, flippedAbout: flipHeight, checkedTaskItem: checkedTaskItem)
         case .container:
             drawContainerDecoration(box, parent: parent, in: context, flippedAbout: flipHeight)
+            let childCheckedTaskItem = checkedTaskItem
+                || (box.node.type == "taskItem" && box.node.attrs["checked"]?.boolValue == true)
             for child in box.children {
                 if child.frame.minY > contentRect.maxY { break }
-                drawBox(child, parent: box, in: context, contentRect: contentRect, flippedAbout: flipHeight)
+                drawBox(
+                    child,
+                    parent: box,
+                    in: context,
+                    contentRect: contentRect,
+                    flippedAbout: flipHeight,
+                    checkedTaskItem: childCheckedTaskItem
+                )
             }
         }
     }
@@ -126,22 +142,51 @@ import UIKit
     }
 
     private func drawTaskCheckbox(for box: LayoutBox, in context: CGContext, flippedAbout flipHeight: CGFloat) {
-        let size: CGFloat = 13
+        let size: CGFloat = 15
         let lineCenter = box.frame.minY + firstLineCenterOffset(in: box)
         let rect = CGRect(
-            x: box.frame.minX + 6,
+            x: box.frame.minX + 5,
             y: flipHeight - lineCenter - size / 2,
             width: size,
             height: size
         )
+        let path = UIBezierPath(roundedRect: rect, cornerRadius: 4).cgPath
+        let checked = box.node.attrs["checked"]?.boolValue == true
         context.saveGState()
-        context.setStrokeColor(UIColor.label.cgColor)
-        context.setLineWidth(1.4)
-        context.stroke(rect)
-        if box.node.attrs["checked"]?.boolValue == true {
-            context.move(to: CGPoint(x: rect.minX + 3, y: rect.midY))
-            context.addLine(to: CGPoint(x: rect.midX - 1, y: rect.maxY - 3))
-            context.addLine(to: CGPoint(x: rect.maxX - 2, y: rect.minY + 3))
+        if checked {
+            context.addPath(path)
+            context.clip()
+            let colors = [
+                UIColor.systemGreen.cgColor,
+                UIColor.systemTeal.cgColor,
+            ] as CFArray
+            let colorSpace = CGColorSpaceCreateDeviceRGB()
+            if let gradient = CGGradient(colorsSpace: colorSpace, colors: colors, locations: [0, 1]) {
+                context.drawLinearGradient(
+                    gradient,
+                    start: CGPoint(x: rect.minX, y: rect.maxY),
+                    end: CGPoint(x: rect.maxX, y: rect.minY),
+                    options: []
+                )
+            }
+            context.resetClip()
+            context.addPath(path)
+            context.setStrokeColor(UIColor.systemGreen.withAlphaComponent(0.85).cgColor)
+            context.setLineWidth(1)
+            context.strokePath()
+
+            context.setStrokeColor(UIColor.white.cgColor)
+            context.setLineCap(.round)
+            context.setLineJoin(.round)
+            context.setLineWidth(2.1)
+            context.move(to: CGPoint(x: rect.minX + 3.2, y: rect.minY + size * 0.45))
+            context.addLine(to: CGPoint(x: rect.minX + size * 0.43, y: rect.minY + size * 0.28))
+            context.addLine(to: CGPoint(x: rect.maxX - 2.4, y: rect.minY + size * 0.72))
+            context.strokePath()
+        } else {
+            context.addPath(path)
+            context.setStrokeColor(UIColor.tertiaryLabel.cgColor)
+            context.setLineWidth(1.5)
             context.strokePath()
         }
         context.restoreGState()
@@ -205,7 +250,11 @@ import UIKit
         ).insetBy(dx: 0, dy: -glyphOverhang)
     }
 
-    private func draw(block: LayoutBox, in context: CGContext, flippedAbout flipHeight: CGFloat) {
+    private func draw(block: LayoutBox, in context: CGContext, flippedAbout flipHeight: CGFloat, checkedTaskItem: Bool = false) {
+        if checkedTaskItem {
+            context.saveGState()
+            context.setAlpha(0.48)
+        }
         for fragment in block.lineFragments {
             guard let typeset = fragment.typesetLine else { continue }
             let baseline = block.frame.minY + fragment.frame.minY + typeset.ascent
@@ -218,7 +267,27 @@ import UIKit
             CTLineDraw(typeset.line, context)
             drawLinkTint(for: typeset.line, lineOrigin: origin, in: context)
             drawStrikethrough(for: typeset.line, lineOrigin: origin, in: context)
+            if checkedTaskItem {
+                drawTaskCompletionStrike(for: fragment, lineOrigin: origin, in: context)
+            }
         }
+        if checkedTaskItem {
+            context.restoreGState()
+        }
+    }
+
+    private func drawTaskCompletionStrike(for fragment: LineFragment, lineOrigin: CGPoint, in context: CGContext) {
+        guard fragment.frame.width > 0 else { return }
+        context.saveGState()
+        context.setAlpha(0.8)
+        context.setStrokeColor(UIColor.label.cgColor)
+        context.setLineWidth(1.4)
+        context.setLineCap(.round)
+        let y = lineOrigin.y + fragment.typographicHeight * 0.28
+        context.move(to: CGPoint(x: lineOrigin.x, y: y))
+        context.addLine(to: CGPoint(x: lineOrigin.x + fragment.frame.width, y: y))
+        context.strokePath()
+        context.restoreGState()
     }
 
     /// Recolours link runs in the link tint after the line is drawn in the body

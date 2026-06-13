@@ -436,9 +436,9 @@ import UIKit
 
         func visit(_ box: LayoutBox) -> Position? {
             if box.node.type == "taskItem" {
-                let size: CGFloat = 13
+                let size: CGFloat = 15
                 let lineCenter = box.frame.minY + taskFirstLineCenterOffset(in: box)
-                let rect = CGRect(x: box.frame.minX + 6, y: lineCenter - size / 2, width: size, height: size).insetBy(dx: -6, dy: -6)
+                let rect = CGRect(x: box.frame.minX + 5, y: lineCenter - size / 2, width: size, height: size).insetBy(dx: -6, dy: -6)
                 // `leaves` is populated on the root box only, so descend the
                 // children to the item's own first leaf instead.
                 if rect.contains(point), let firstLeaf = firstLeafBlock(in: box) {
