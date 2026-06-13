@@ -18,6 +18,16 @@ struct ProseExampleApp: App {
                 NavigationStack {
                     SimpleEditorScreen(demo: Demo.all.first { $0.id == "simple" }!)
                 }
+            } else if let demo = Self.deepLinkedDemo {
+                // `-demo <id>` deep-links to one demo for screenshots / review
+                // (simctl can't tap to navigate).
+                NavigationStack {
+                    if demo.id == "simple" {
+                        SimpleEditorScreen(demo: demo)
+                    } else {
+                        DemoEditorScreen(demo: demo)
+                    }
+                }
             } else {
                 DemoListView()
             }
@@ -29,6 +39,13 @@ struct ProseExampleApp: App {
               CommandLine.arguments.indices.contains(index + 1) else { return nil }
         return Int(CommandLine.arguments[index + 1])
     }()
+
+    private static var deepLinkedDemo: Demo? {
+        guard let index = CommandLine.arguments.firstIndex(of: "-demo"),
+              CommandLine.arguments.indices.contains(index + 1) else { return nil }
+        let id = CommandLine.arguments[index + 1]
+        return Demo.all.first { $0.id == id }
+    }
 }
 
 // MARK: - Demo catalog
