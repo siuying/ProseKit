@@ -33,6 +33,21 @@ final class CommandTests: XCTestCase {
         XCTAssertEqual(state.selection, TextSelection(anchor: 9, head: 9))
     }
 
+    func testTypingAfterSplittingAtEndOfOrderedListItemFillsNewItem() throws {
+        var state = EditorState(document: Document(.doc([
+            .orderedList([
+                .listItem([.paragraph([.text("hello world")])]),
+            ]),
+        ])), selection: TextSelection(anchor: 15, head: 15))
+
+        XCTAssertTrue(try Commands.splitBlock().run(in: &state))
+        try state.insertText("next")
+
+        let list = state.document.root.content[0]
+        XCTAssertEqual(list.content.map(\.plainText), ["hello world", "next"])
+        XCTAssertEqual(state.selection, TextSelection(anchor: 23, head: 23))
+    }
+
     func testSplitBlockOnEmptyListItemExitsTheList() throws {
         var state = EditorState(document: Document(.doc([
             .bulletList([

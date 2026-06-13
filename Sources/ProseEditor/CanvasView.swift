@@ -136,9 +136,16 @@ import UIKit
         let width = CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
         let lineCenter = box.frame.minY + firstLineCenterOffset(in: box)
         context.saveGState()
-        context.textPosition = CGPoint(x: box.frame.minX + 20 - width, y: flipHeight - lineCenter + 6)
+        context.textPosition = CGPoint(
+            x: Self.orderedMarkerOriginX(markerWidth: width, itemMinX: box.frame.minX),
+            y: flipHeight - lineCenter + 6
+        )
         CTLineDraw(line, context)
         context.restoreGState()
+    }
+
+    static func orderedMarkerOriginX(markerWidth: CGFloat, itemMinX: CGFloat) -> CGFloat {
+        max(itemMinX + 4, itemMinX + containerIndent(forType: "listItem") - 8 - markerWidth)
     }
 
     private func drawTaskCheckbox(for box: LayoutBox, in context: CGContext, flippedAbout flipHeight: CGFloat) {

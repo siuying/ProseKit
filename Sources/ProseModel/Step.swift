@@ -23,6 +23,18 @@ public protocol Step: Sendable {
 /// `ReplaceStep`.
 private func replacingText(in document: Document, from: Position, to: Position, with insertedText: String, marks: [Mark]) throws -> Document {
     guard let range = document.textRange(from: from, to: to) else {
+        if from == to,
+           let info = document.blockInfo(containing: from),
+           info.node.isTextblock,
+           info.node.plainText.isEmpty,
+           from == info.start + 1 {
+            let childIndex = info.path.last ?? info.index
+            let parentPath = Array(info.path.dropLast())
+            let replacement = insertedText.isEmpty
+                ? info.node
+                : info.node.withContent([.text(insertedText, marks: marks)])
+            return document.replacingBlocks(at: parentPath, childRange: childIndex..<(childIndex + 1), with: [replacement])
+        }
         // The range crosses a run or block boundary; merge across it.
         return try replacingAcrossRuns(in: document, from: from, to: to, with: insertedText, marks: marks)
     }
