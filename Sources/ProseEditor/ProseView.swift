@@ -392,6 +392,7 @@ import UIKit
         runCommand(Commands.toggleMark(mark))
     }
 
+    public func removeMark(type: String) { runCommand(Commands.removeMark(type: type)) }
     public func setLink(_ href: String) { runCommand(Commands.setLink(href: href)) }
     public func setTextAlign(_ value: String?) { runCommand(Commands.setTextAlign(value)) }
     public func setBlockType(headingLevel level: Int?) { runCommand(Commands.setBlockType(headingLevel: level)) }

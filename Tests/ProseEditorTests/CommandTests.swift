@@ -217,6 +217,17 @@ final class CommandTests: XCTestCase {
         XCTAssertEqual(state.document.root.content[0].content[0].marks, [])
     }
 
+    func testRemoveMarkTypeClearsHighlightButLeavesOtherMarks() throws {
+        var state = EditorState(document: Document(.doc([
+            .paragraph([.text("hello", marks: [.bold, .highlight(color: "#ffd54f")])]),
+        ])), selection: TextSelection(anchor: 2, head: 7))
+
+        XCTAssertTrue(try Commands.removeMark(type: "highlight").run(in: &state))
+
+        XCTAssertEqual(state.document.root.content[0].content[0].marks, [.bold])
+        XCTAssertEqual(state.selection, TextSelection(anchor: 2, head: 7))
+    }
+
     func testSetBlockTypeChangesHeadingLevelWithoutToggling() throws {
         var state = EditorState(document: Document(.doc([
             .heading(level: 1, [.text("hi")]),

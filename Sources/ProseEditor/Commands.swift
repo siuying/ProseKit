@@ -304,6 +304,22 @@ public enum Commands {
         }
     }
 
+    public static func removeMark(type: String) -> Command {
+        Command { state in
+            let lower = min(state.selection.anchor, state.selection.head)
+            let upper = max(state.selection.anchor, state.selection.head)
+            guard lower < upper else { return false }
+            let marks = state.document.marks(from: lower, to: upper).filter { $0.type == type }
+            guard !marks.isEmpty else { return false }
+            try state.dispatch(Transaction(
+                steps: marks.map { RemoveMarkStep(from: lower, to: upper, mark: $0) },
+                selection: state.selection,
+                origin: .local
+            ))
+            return true
+        }
+    }
+
     /// Dispatches a single block-attribute Step with the selection collapsed
     /// to the head — what the block-level toolbar actions do.
     private static func dispatchCollapsing(_ step: any Step, in state: inout EditorState) throws {

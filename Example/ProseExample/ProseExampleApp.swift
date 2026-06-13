@@ -260,7 +260,13 @@ private struct SimpleEditorToolbar: View {
     ]
 
     // The default highlight swatches (mirrors HighlightColor's palette).
-    private let swatches = ["#ffd54f", "#ff8a80", "#80d8ff", "#ccff90", "#ea80fc"]
+    private let swatches = [
+        (name: "Yellow", hex: "#ffd54f"),
+        (name: "Red", hex: "#ff8a80"),
+        (name: "Blue", hex: "#80d8ff"),
+        (name: "Green", hex: "#ccff90"),
+        (name: "Purple", hex: "#ea80fc"),
+    ]
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -365,8 +371,21 @@ private struct SimpleEditorToolbar: View {
 
     private var highlightMenu: some View {
         Menu {
-            ForEach(swatches, id: \.self) { hex in
-                Button(hex) { editor.view?.toggleMark(.highlight(color: hex)) }
+            Button("Remove Highlight", systemImage: "xmark.circle") {
+                editor.view?.removeMark(type: "highlight")
+            }
+            Divider()
+            ForEach(swatches, id: \.hex) { swatch in
+                Button {
+                    editor.view?.toggleMark(.highlight(color: swatch.hex))
+                } label: {
+                    Label {
+                        Text(swatch.name)
+                    } icon: {
+                        Circle()
+                            .fill(color(for: swatch.hex))
+                    }
+                }
             }
         } label: {
             Image(systemName: "highlighter")
@@ -379,6 +398,17 @@ private struct SimpleEditorToolbar: View {
     private var blockLabel: String {
         if let level = editor.headingLevel { return "H\(level)" }
         return "Paragraph"
+    }
+
+    private func color(for hex: String) -> Color {
+        var value = hex
+        if value.hasPrefix("#") { value.removeFirst() }
+        guard value.count == 6, let int = UInt32(value, radix: 16) else { return .secondary }
+        return Color(
+            red: Double((int >> 16) & 0xFF) / 255,
+            green: Double((int >> 8) & 0xFF) / 255,
+            blue: Double(int & 0xFF) / 255
+        )
     }
 
     private func symbol(for type: String) -> String {
