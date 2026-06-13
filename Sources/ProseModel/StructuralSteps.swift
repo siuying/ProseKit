@@ -62,6 +62,20 @@ public struct JoinBlocksStep: Step, Codable, Equatable, Sendable {
     }
 }
 
+/// Sets the block at `position` to a heading of `level`, or a paragraph when
+/// `level` is nil. Toggling (heading back to paragraph) is a Command decision
+/// layered on top; this only sets. Built on the block-replace primitive.
+private func settingBlockType(in document: Document, at position: Position, headingLevel level: Int?) throws -> StepApplication {
+    guard let info = document.blockInfo(containing: position) else {
+        throw StepError.unsupportedReplacement("setBlockType requires a text block")
+    }
+    let updated = level.map(info.node.asHeading(level:)) ?? info.node.asParagraph()
+    return StepApplication(
+        document: document.replacingBlocks(in: info.index..<(info.index + 1), with: [updated]),
+        changedRange: info.start..<(info.start + updated.nodeSize)
+    )
+}
+
 /// Sets the block containing `at` to a heading of `headingLevel`, or to a
 /// paragraph when it is nil. Block sizes are unchanged, so Positions are stable.
 public struct SetBlockTypeStep: Step, Codable, Equatable, Sendable {
@@ -74,7 +88,7 @@ public struct SetBlockTypeStep: Step, Codable, Equatable, Sendable {
     }
 
     public func apply(to document: Document) throws -> StepApplication {
-        try document.settingBlockType(at: at, headingLevel: headingLevel)
+        try settingBlockType(in: document, at: at, headingLevel: headingLevel)
     }
 
     public func inverted(in document: Document) throws -> any Step {
@@ -86,6 +100,26 @@ public struct SetBlockTypeStep: Step, Codable, Equatable, Sendable {
     public func map(_ position: Position) -> Position {
         position
     }
+}
+
+/// Sets (or clears) the `textAlign` Attr on the block at `position`. Only
+/// paragraph and heading carry it (Q9.2); `nil` or `"left"` clears it, keeping
+/// the absent-means-left default rather than storing a redundant Attr.
+private func settingTextAlign(in document: Document, at position: Position, to value: String?) throws -> StepApplication {
+    guard let info = document.blockInfo(containing: position),
+          info.node.type == "paragraph" || info.node.type == "heading" else {
+        throw StepError.unsupportedReplacement("textAlign applies to paragraph and heading")
+    }
+    var updated = info.node
+    if let value, value != "left" {
+        updated.attrs["textAlign"] = .string(value)
+    } else {
+        updated.attrs["textAlign"] = nil
+    }
+    return StepApplication(
+        document: document.replacingBlocks(in: info.index..<(info.index + 1), with: [updated]),
+        changedRange: info.start..<(info.start + updated.nodeSize)
+    )
 }
 
 /// Sets (or clears, when nil/"left") the `textAlign` Attr on the block
@@ -100,7 +134,7 @@ public struct SetTextAlignStep: Step, Codable, Equatable, Sendable {
     }
 
     public func apply(to document: Document) throws -> StepApplication {
-        try document.settingTextAlign(at: at, to: value)
+        try settingTextAlign(in: document, at: at, to: value)
     }
 
     public func inverted(in document: Document) throws -> any Step {

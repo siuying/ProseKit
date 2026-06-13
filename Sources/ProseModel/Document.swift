@@ -87,7 +87,11 @@ public struct Document: Codable, Hashable, Sendable {
     /// derived, not rebuilt: only the new blocks are measured, and the tail
     /// entries shift by constant deltas. Rebuilding (`makeIndex`) re-counts
     /// every block's text, which made each keystroke O(document).
-    private func replacingBlocks(in range: Range<Int>, with newBlocks: [Node]) -> Document {
+    ///
+    /// The block-replace primitive: the one write seam every Step builds on.
+    /// Steps choose the new blocks; the index derivation behind this stays
+    /// private (the O(log blocks) keystroke invariant).
+    func replacingBlocks(in range: Range<Int>, with newBlocks: [Node]) -> Document {
         var blocks = root.content
         blocks.replaceSubrange(range, with: newBlocks)
         return Document(
@@ -275,40 +279,6 @@ public struct Document: Codable, Hashable, Sendable {
         )
     }
 
-    /// Sets the block at `position` to a heading of `level`, or a paragraph
-    /// when `level` is nil. Toggling (heading back to paragraph) is a Command
-    /// decision layered on top; the Document only sets.
-    public func settingBlockType(at position: Position, headingLevel level: Int?) throws -> StepApplication {
-        guard let info = blockInfo(containing: position) else {
-            throw StepError.unsupportedReplacement("setBlockType requires a text block")
-        }
-        let updated = level.map(info.node.asHeading(level:)) ?? info.node.asParagraph()
-        return StepApplication(
-            document: replacingBlocks(in: info.index..<(info.index + 1), with: [updated]),
-            changedRange: info.start..<(info.start + updated.nodeSize)
-        )
-    }
-
-    /// Sets (or clears) the `textAlign` Attr on the block at `position`.
-    /// Only paragraph and heading carry it (Q9.2); `nil` or `"left"` clears it,
-    /// keeping the absent-means-left default rather than storing a redundant Attr.
-    public func settingTextAlign(at position: Position, to value: String?) throws -> StepApplication {
-        guard let info = blockInfo(containing: position),
-              info.node.type == "paragraph" || info.node.type == "heading" else {
-            throw StepError.unsupportedReplacement("textAlign applies to paragraph and heading")
-        }
-        var updated = info.node
-        if let value, value != "left" {
-            updated.attrs["textAlign"] = .string(value)
-        } else {
-            updated.attrs["textAlign"] = nil
-        }
-        return StepApplication(
-            document: replacingBlocks(in: info.index..<(info.index + 1), with: [updated]),
-            changedRange: info.start..<(info.start + updated.nodeSize)
-        )
-    }
-
     /// The Position of the first text character in the block containing
     /// `position` (one past the block's opening boundary).
     public func blockTextStart(at position: Position) -> Position? {
@@ -406,7 +376,11 @@ public struct Document: Codable, Hashable, Sendable {
     /// block, then a scan of that block's text runs. Blocks are flat in
     /// slice 1 (paragraph/heading of text runs), so a whole-tree walk here
     /// only added an O(document) term to every edit.
-    private func textRange(from: Position, to: Position) -> TextRange? {
+    ///
+    /// A shared query: the `rangeHasMark` query and the mark/replace edit
+    /// algebra both locate text nodes through here, so it stays on Document
+    /// rather than moving into a Step ("where is this text node" is a read).
+    func textRange(from: Position, to: Position) -> TextRange? {
         guard let info = blockInfo(containing: from) else { return nil }
         var textStart = info.start + 1
         for (childIndex, child) in info.node.content.enumerated() where child.isText {
@@ -425,7 +399,7 @@ public struct Document: Codable, Hashable, Sendable {
 
 public typealias Position = Int
 
-private struct TextRange {
+struct TextRange {
     var path: [Int]
     var text: String
     var range: Range<String.Index>

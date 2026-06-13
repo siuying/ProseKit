@@ -62,13 +62,13 @@ final class DerivedIndexTests: XCTestCase {
 
     func testSettingBlockTypeDerivesIndex() throws {
         let position = document.position(ofTextInBlockAt: 1)!
-        let toggled = try document.settingBlockType(at: position, headingLevel: 2).document
+        let toggled = try SetBlockTypeStep(at: position, headingLevel: 2).apply(to: document).document
         assertIndexMatchesRebuild(toggled, "paragraph to heading")
 
-        let untoggled = try document.settingBlockType(
+        let untoggled = try SetBlockTypeStep(
             at: document.position(ofTextInBlockAt: 0)!,
             headingLevel: nil
-        ).document
+        ).apply(to: document).document
         assertIndexMatchesRebuild(untoggled, "heading to paragraph")
     }
 
