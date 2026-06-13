@@ -310,19 +310,36 @@ final class ProseViewTests: XCTestCase {
         XCTAssertEqual((view.selectedTextRange as? ProseTextRange)?.head, 2)
     }
 
-    func testDeleteBackwardOverCrossBlockSelectionLeavesDocumentUntouched() {
-        // Deleting a selection that spans blocks is not expressible as a
-        // single-text-node ReplaceStep yet; it must no-op, never trap.
-        let document = Document(.doc([
+    func testDeleteBackwardOverCrossBlockSelectionDeletesAndJoins() {
+        // Deleting a selection that spans blocks removes the selected text
+        // and merges the boundary blocks (ProseMirror replace semantics).
+        let view = makeView(Document(.doc([
             .paragraph([.text("hello")]),
             .paragraph([.text("world")]),
-        ]))
-        let view = makeView(document)
+        ])))
         view.selectedTextRange = ProseTextRange(anchor: 4, head: 11)
 
         view.deleteBackward()
 
-        XCTAssertEqual(view.document, document)
+        XCTAssertEqual(view.document.root.content.count, 1)
+        XCTAssertEqual(view.document.plainText, "herld")
+        XCTAssertEqual((view.selectedTextRange as? ProseTextRange)?.head, 4)
+    }
+
+    func testReplacingTheBlockBoundaryNewlineJoinsBlocks() {
+        // The iOS keyboard backspaces at a block start by replacing the
+        // boundary "\n" in character space via replace(_:withText:) — a path
+        // deleteBackward's join command never sees. It must join the blocks.
+        let view = makeView(Document(.doc([
+            .paragraph([.text("hello")]),
+            .paragraph([.text("world")]),
+        ])))
+
+        view.replace(ProseTextRange(anchor: 7, head: 9), withText: "")
+
+        XCTAssertEqual(view.document.root.content.count, 1)
+        XCTAssertEqual(view.document.plainText, "helloworld")
+        XCTAssertEqual((view.selectedTextRange as? ProseTextRange)?.head, 7)
     }
 }
 

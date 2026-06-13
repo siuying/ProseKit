@@ -263,7 +263,9 @@ public struct Document: Codable, Hashable, Sendable {
         if textCount(ofBlockAt: info.index) == 0 {
             joined = replacingBlocks(in: info.index..<(info.index + 1), with: [])
         } else {
-            let merged = previous.withContent([.text(previous.plainText + current.plainText)])
+            // Concatenating the runs (not the plain text) keeps both blocks'
+            // Marks across the join, like ProseMirror.
+            let merged = previous.withContent(previous.content + current.content)
             joined = replacingBlocks(in: (info.index - 1)..<(info.index + 1), with: [merged])
         }
 
@@ -325,7 +327,8 @@ public struct Document: Codable, Hashable, Sendable {
 
     public func replacingText(from: Position, to: Position, with insertedText: String, marks: [Mark] = []) throws -> Document {
         guard let range = textRange(from: from, to: to) else {
-            throw StepError.unsupportedReplacement("replacement range must stay inside one text node")
+            // The range crosses a run or block boundary; merge across it.
+            return try replacingAcrossRuns(from: from, to: to, with: insertedText, marks: marks)
         }
         if !marks.isEmpty, from == to, range.path.count == 2 {
             let offset = range.text.distance(from: range.text.startIndex, to: range.range.lowerBound)
@@ -344,6 +347,26 @@ public struct Document: Codable, Hashable, Sendable {
         let newRoot = root.replacingTextNode(atPath: range.path, with: updated)
         guard range.path.count == 2 else { return Document(newRoot) }
         return replacing(root: newRoot, blockAt: range.path[0])
+    }
+
+    /// Replacement whose range crosses a text-run or block boundary: the
+    /// blocks at the ends merge into one block of the first's type, keeping
+    /// the runs outside the range — ProseMirror's replace semantics. This is
+    /// what Backspace at a block start becomes when the keyboard deletes the
+    /// boundary "\n" in character space, and what typing over a selection
+    /// spanning blocks does.
+    private func replacingAcrossRuns(from: Position, to: Position, with insertedText: String, marks: [Mark]) throws -> Document {
+        guard from <= to,
+              let fromInfo = blockInfo(containing: from),
+              let toInfo = blockInfo(containing: to),
+              fromInfo.index <= toInfo.index else {
+            throw StepError.unsupportedReplacement("replacement range must lie within the document's text")
+        }
+        let head = fromInfo.node.inlineRuns(upTo: from - (fromInfo.start + 1))
+        let tail = toInfo.node.inlineRuns(from: to - (toInfo.start + 1))
+        let inserted: [Node] = insertedText.isEmpty ? [] : [.text(insertedText, marks: marks)]
+        let merged = fromInfo.node.withContent(head + inserted + tail)
+        return replacingBlocks(in: fromInfo.index..<(toInfo.index + 1), with: [merged])
     }
 
     public func addingMark(from: Position, to: Position, mark: Mark) throws -> Document {
@@ -470,6 +493,50 @@ private extension Node {
         }
         copy.content[blockIndex].content.replaceSubrange(textIndex...textIndex, with: replacement)
         return copy
+    }
+
+    /// The text runs covering the block's first `offset` characters, Marks
+    /// preserved; the run straddling the cut is split.
+    func inlineRuns(upTo offset: Int) -> [Node] {
+        var runs: [Node] = []
+        var remaining = max(0, min(plainText.count, offset))
+        for child in content where child.isText {
+            guard remaining > 0 else { break }
+            let text = child.text ?? ""
+            if text.count <= remaining {
+                if !text.isEmpty {
+                    runs.append(child)
+                }
+                remaining -= text.count
+            } else {
+                let cut = text.index(text.startIndex, offsetBy: remaining)
+                runs.append(.text(String(text[..<cut]), marks: child.marks))
+                remaining = 0
+            }
+        }
+        return runs
+    }
+
+    /// The text runs from the block's character `offset` to its end, Marks
+    /// preserved; the run straddling the cut is split.
+    func inlineRuns(from offset: Int) -> [Node] {
+        var runs: [Node] = []
+        var remaining = max(0, min(plainText.count, offset))
+        for child in content where child.isText {
+            let text = child.text ?? ""
+            if remaining >= text.count {
+                remaining -= text.count
+                continue
+            }
+            if remaining > 0 {
+                let cut = text.index(text.startIndex, offsetBy: remaining)
+                runs.append(.text(String(text[cut...]), marks: child.marks))
+                remaining = 0
+            } else if !text.isEmpty {
+                runs.append(child)
+            }
+        }
+        return runs
     }
 
     func textNode(atPath path: [Int]) -> Node? {

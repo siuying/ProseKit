@@ -90,6 +90,19 @@ final class EditorStateTests: XCTestCase {
         XCTAssertEqual(state.document, document)
     }
 
+    func testInsertTextOverCrossBlockSelectionReplacesAndJoins() throws {
+        var state = EditorState(document: Document(.doc([
+            .paragraph([.text("hello")]),
+            .paragraph([.text("world")]),
+        ])), selection: TextSelection(anchor: 4, head: 11))
+
+        try state.insertText("X")
+
+        XCTAssertEqual(state.document.root.content.count, 1)
+        XCTAssertEqual(state.document.plainText, "heXrld")
+        XCTAssertEqual(state.selection, TextSelection(anchor: 5, head: 5))
+    }
+
     func testTypingMarksInsertSuppliesChangedRange() throws {
         var state = EditorState(document: Document(.doc([
             .paragraph([.text("hi")]),
