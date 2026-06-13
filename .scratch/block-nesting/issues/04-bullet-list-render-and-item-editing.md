@@ -1,6 +1,6 @@
 # 04 — Bullet list: render markers + item editing
 
-Status: ready-for-agent
+Status: ready-for-human
 
 ## What to build
 
@@ -28,16 +28,18 @@ intents are new.
 
 ## Acceptance criteria
 
-- [ ] A Tiptap `bulletList` loads, round-trips, and renders with bullets +
+- [x] A Tiptap `bulletList` loads, round-trips, and renders with bullets +
       indent
-- [ ] Enter creates a new list item; Enter on an empty item exits the list
-- [ ] Backspace joins into the previous item / lifts the first item out
-- [ ] `- ` (and `* `) wraps a paragraph into a bullet list; Backspace reverts
-- [ ] Structural Steps invert and map correctly (round-trip restores Document +
+- [x] Enter creates a new list item; Enter on an empty item exits the list
+- [x] Backspace joins into the previous item / lifts the first item out
+- [x] `- ` (and `* `) wraps a paragraph into a bullet list; Backspace reverts
+      (rule + revert unit-tested via `InputRules.apply`; live keystroke wiring
+      stays deferred project-wide, as for the heading / `> ` rules)
+- [x] Structural Steps invert and map correctly (round-trip restores Document +
       index)
-- [ ] Rendering-equivalence across item create / join / lift; iOS simulator
+- [x] Rendering-equivalence across item create / join / lift; iOS simulator
       screenshot confirms bullets render
-- [ ] Full package suite green
+- [x] Full package suite green
 
 ## Blocked by
 
