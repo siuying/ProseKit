@@ -276,6 +276,13 @@ private struct SimpleEditorToolbar: View {
 
                 Divider().frame(height: 24)
 
+                listMenu
+                toolButton("increase.indent", "Indent") { editor.view?.sinkListItem() }
+                toolButton("decrease.indent", "Outdent") { editor.view?.liftListItem() }
+                toolButton("checklist.checked", "Toggle task") { editor.view?.toggleTaskItemChecked() }
+
+                Divider().frame(height: 24)
+
                 align("left", "text.alignleft")
                 align("center", "text.aligncenter")
                 align("right", "text.alignright")
@@ -306,6 +313,26 @@ private struct SimpleEditorToolbar: View {
         }
         .buttonStyle(.bordered)
         .tint(.secondary)
+    }
+
+    private func toolButton(_ symbol: String, _ label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) { Image(systemName: symbol) }
+            .buttonStyle(.bordered)
+            .tint(.secondary)
+            .accessibilityLabel(label)
+    }
+
+    private var listMenu: some View {
+        Menu {
+            Button("Bullet List", systemImage: "list.bullet") { editor.view?.wrapInList("bulletList") }
+            Button("Ordered List", systemImage: "list.number") { editor.view?.wrapInList("orderedList") }
+            Button("Task List", systemImage: "checklist") { editor.view?.wrapInList("taskList") }
+        } label: {
+            Image(systemName: "list.bullet")
+                .frame(height: 30)
+                .padding(.horizontal, 8)
+                .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+        }
     }
 
     private var blockMenu: some View {

@@ -202,6 +202,34 @@ public enum Commands {
         }
     }
 
+    /// Wraps the top-level textblock at the caret in a one-item list of
+    /// `listType` (`bulletList`/`orderedList`/`taskList`) — the headless side of
+    /// the list toolbar buttons and of the `- ` / `1. ` input rules. No-ops when
+    /// the caret is not in a top-level textblock (wrapping a block already inside
+    /// a list would nest it, which Tab handles instead).
+    public static func wrapInList(_ listType: String) -> Command {
+        Command { state in
+            guard isListType(listType),
+                  let info = state.document.blockInfo(containing: state.selection.head),
+                  info.node.isTextblock,
+                  info.path.count == 1 else {
+                return false
+            }
+            let step = WrapInListStep(
+                blockRange: info.start..<(info.start + info.node.nodeSize),
+                listType: listType,
+                listAttrs: listType == "orderedList" ? ["start": .int(1)] : [:],
+                itemType: itemType(forListType: listType)
+            )
+            try state.dispatch(Transaction(
+                steps: [step],
+                selection: TextSelection(anchor: step.map(state.selection.anchor), head: step.map(state.selection.head)),
+                origin: .local
+            ))
+            return true
+        }
+    }
+
     /// A heading of any level toggles back to a paragraph; a paragraph becomes
     /// a heading of `level`.
     public static func toggleHeading(level: Int) -> Command {
