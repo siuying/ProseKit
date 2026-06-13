@@ -11,7 +11,7 @@ public struct Schema: Sendable {
     }
 
     public static let slice1 = Schema(
-        nodes: ["doc", "paragraph", "heading", "blockquote", "bulletList", "listItem", "text"],
+        nodes: ["doc", "paragraph", "heading", "blockquote", "bulletList", "orderedList", "listItem", "text"],
         marks: ["bold", "italic", "code", "strike", "underline", "highlight", "superscript", "subscript", "link"]
     )
 

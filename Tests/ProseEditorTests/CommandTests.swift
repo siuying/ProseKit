@@ -82,6 +82,38 @@ final class CommandTests: XCTestCase {
         XCTAssertEqual(state.selection, TextSelection(anchor: 6, head: 6))
     }
 
+    func testIndentListItemSinksUnderPreviousItem() throws {
+        var state = EditorState(document: Document(.doc([
+            .bulletList([
+                .listItem([.paragraph([.text("ab")])]),
+                .listItem([.paragraph([.text("cd")])]),
+            ]),
+        ])), selection: TextSelection(anchor: 10, head: 10))
+
+        XCTAssertTrue(try Commands.sinkListItem().run(in: &state))
+
+        let firstItem = state.document.root.content[0].content[0]
+        XCTAssertEqual(state.document.root.content[0].content.count, 1)
+        XCTAssertEqual(firstItem.content.map(\.type), ["paragraph", "bulletList"])
+        XCTAssertEqual(state.selection, TextSelection(anchor: 10, head: 10))
+    }
+
+    func testOutdentNestedListItemLiftsAfterParentItem() throws {
+        var state = EditorState(document: Document(.doc([
+            .bulletList([
+                .listItem([
+                    .paragraph([.text("ab")]),
+                    .bulletList([.listItem([.paragraph([.text("cd")])])]),
+                ]),
+            ]),
+        ])), selection: TextSelection(anchor: 10, head: 10))
+
+        XCTAssertTrue(try Commands.liftListItem().run(in: &state))
+
+        XCTAssertEqual(state.document.root.content[0].content.map(\.plainText), ["ab", "cd"])
+        XCTAssertEqual(state.selection, TextSelection(anchor: 10, head: 10))
+    }
+
     func testJoinBackwardPreservesMarksOfBothBlocks() throws {
         var state = EditorState(document: Document(.doc([
             .paragraph([.text("a", marks: [.bold])]),

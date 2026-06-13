@@ -45,7 +45,7 @@ import UIKit
         for box in layoutBox.children {
             // Boxes are y-ordered; everything past the dirty rect is clean.
             if box.frame.minY > contentRect.maxY { break }
-            drawBox(box, in: context, contentRect: contentRect, flippedAbout: flipHeight)
+            drawBox(box, parent: layoutBox, in: context, contentRect: contentRect, flippedAbout: flipHeight)
         }
         context.restoreGState()
     }
@@ -53,16 +53,16 @@ import UIKit
     /// Draws one box: a leaf typesets its line fragments; a container paints its
     /// decoration (the blockquote rule) then recurses into its children. Boxes
     /// outside the dirty region are skipped.
-    private func drawBox(_ box: LayoutBox, in context: CGContext, contentRect: CGRect, flippedAbout flipHeight: CGFloat) {
+    private func drawBox(_ box: LayoutBox, parent: LayoutBox?, in context: CGContext, contentRect: CGRect, flippedAbout flipHeight: CGFloat) {
         guard box.frame.intersects(contentRect) else { return }
         switch box.kind {
         case .leafBlock:
             draw(block: box, in: context, flippedAbout: flipHeight)
         case .container:
-            drawContainerDecoration(box, in: context, flippedAbout: flipHeight)
+            drawContainerDecoration(box, parent: parent, in: context, flippedAbout: flipHeight)
             for child in box.children {
                 if child.frame.minY > contentRect.maxY { break }
-                drawBox(child, in: context, contentRect: contentRect, flippedAbout: flipHeight)
+                drawBox(child, parent: box, in: context, contentRect: contentRect, flippedAbout: flipHeight)
             }
         }
     }
@@ -70,7 +70,7 @@ import UIKit
     /// Container decorations drawn in content space (flipped about the layout
     /// height like the glyphs). Slice 01: the blockquote's vertical rule down
     /// its indent band.
-    private func drawContainerDecoration(_ box: LayoutBox, in context: CGContext, flippedAbout flipHeight: CGFloat) {
+    private func drawContainerDecoration(_ box: LayoutBox, parent: LayoutBox?, in context: CGContext, flippedAbout flipHeight: CGFloat) {
         switch box.node.type {
         case "blockquote":
             let rule = CGRect(
@@ -84,19 +84,43 @@ import UIKit
             context.fill(rule)
             context.restoreGState()
         case "listItem":
-            // A bullet disc centred on the item's first line, in the indent band
-            // to the left of the text.
-            let radius: CGFloat = 2.75
-            let lineCenter = box.frame.minY + firstLineCenterOffset(in: box)
-            let center = CGPoint(x: box.frame.minX + 12, y: flipHeight - lineCenter)
-            let rect = CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
-            context.saveGState()
-            context.setFillColor(UIColor.label.cgColor)
-            context.fillEllipse(in: rect)
-            context.restoreGState()
+            if parent?.node.type == "orderedList" {
+                drawOrderedMarker(for: box, parent: parent, in: context, flippedAbout: flipHeight)
+            } else {
+                // A bullet disc centred on the item's first line, in the indent
+                // band to the left of the text.
+                let radius: CGFloat = 2.75
+                let lineCenter = box.frame.minY + firstLineCenterOffset(in: box)
+                let center = CGPoint(x: box.frame.minX + 12, y: flipHeight - lineCenter)
+                let rect = CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
+                context.saveGState()
+                context.setFillColor(UIColor.label.cgColor)
+                context.fillEllipse(in: rect)
+                context.restoreGState()
+            }
         default:
             break
         }
+    }
+
+    private func drawOrderedMarker(for box: LayoutBox, parent: LayoutBox?, in context: CGContext, flippedAbout flipHeight: CGFloat) {
+        guard let parent,
+              let index = parent.children.firstIndex(where: { $0.positionRange == box.positionRange }) else {
+            return
+        }
+        let start = parent.node.attrs["start"]?.intValue ?? 1
+        let marker = "\(start + index)."
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: UIFont.preferredFont(forTextStyle: .body),
+            .foregroundColor: UIColor.label,
+        ]
+        let line = CTLineCreateWithAttributedString(NSAttributedString(string: marker, attributes: attributes))
+        let width = CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
+        let lineCenter = box.frame.minY + firstLineCenterOffset(in: box)
+        context.saveGState()
+        context.textPosition = CGPoint(x: box.frame.minX + 20 - width, y: flipHeight - lineCenter + 6)
+        CTLineDraw(line, context)
+        context.restoreGState()
     }
 
     /// The vertical centre of a container's first line, relative to the

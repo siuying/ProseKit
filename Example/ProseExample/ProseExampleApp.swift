@@ -113,6 +113,13 @@ private struct Demo: Identifiable, Hashable {
             makeDocument: { .bulletList }
         ),
         Demo(
+            id: "ordered",
+            title: "Ordered List",
+            subtitle: "Ordinals derived from sibling index; Tab/Shift-Tab sink and lift to nest",
+            icon: "list.number",
+            makeDocument: { .orderedList }
+        ),
+        Demo(
             id: "large",
             title: "Large Document",
             subtitle: "2,000 paragraphs: fling scrolling, keyboard avoidance, responsive typing",
@@ -520,6 +527,23 @@ extension Document {
             .listItem([.paragraph([.text("Third and final item.")])]),
         ]),
         .paragraph([.text("And a plain paragraph back at the top level below the list.")]),
+    ]))
+
+    fileprivate static let orderedList = Document(.doc([
+        .heading(level: 1, [.text("Ordered List")]),
+        .paragraph([.text("An ordered list draws an ordinal per item, derived at draw time from the item's index among its siblings — nothing is stored in the model:")]),
+        .orderedList([
+            .listItem([.paragraph([.text("First step.")])]),
+            .listItem([
+                .paragraph([.text("Second step, with a nested ordered list:")]),
+                .orderedList([
+                    .listItem([.paragraph([.text("A nested item, numbered from one again.")])]),
+                    .listItem([.paragraph([.text("Another nested item.")])]),
+                ]),
+            ]),
+            .listItem([.paragraph([.text("Third step, back at the outer level.")])]),
+        ]),
+        .paragraph([.text("Press Tab at an item's start to sink it; Shift-Tab lifts it back out.")]),
     ]))
 
     fileprivate static let structure = Document(.doc([

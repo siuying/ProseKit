@@ -41,6 +41,15 @@ final class InputRuleTests: XCTestCase {
         XCTAssertEqual(s.document.root.content[0].type, "bulletList")
     }
 
+    func testOneDotSpaceBecomesOrderedList() throws {
+        var s = state("1. ")
+        XCTAssertTrue(try InputRules.apply(InputRules.starterKit, to: &s))
+        XCTAssertEqual(s.document.root.content[0].type, "orderedList")
+        XCTAssertEqual(s.document.root.content[0].attrs["start"], .int(1))
+        XCTAssertEqual(s.document.root.content[0].content.map(\.type), ["listItem"])
+        XCTAssertEqual(s.selection, TextSelection(anchor: 4, head: 4))
+    }
+
     func testNonTriggerTextDoesNothing() throws {
         var s = state("#x ")
         XCTAssertFalse(try InputRules.apply(InputRules.starterKit, to: &s))
