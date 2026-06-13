@@ -23,22 +23,22 @@ final class DerivedIndexTests: XCTestCase {
 
     func testReplacingTextDerivesIndex() throws {
         let textStart = document.position(ofTextInBlockAt: 1)!
-        let inserted = try document.replacingText(from: textStart + 6, to: textStart + 6, with: "of the ")
+        let inserted = try ReplaceStep(from: textStart + 6, to: textStart + 6, insertText: "of the ").apply(to: document).document
         assertIndexMatchesRebuild(inserted, "insertion")
 
-        let deleted = try document.replacingText(from: textStart, to: textStart + 7, with: "")
+        let deleted = try ReplaceStep(from: textStart, to: textStart + 7, insertText: "").apply(to: document).document
         assertIndexMatchesRebuild(deleted, "deletion")
 
         let lastTextStart = document.position(ofTextInBlockAt: 3)!
-        let atEnd = try document.replacingText(from: lastTextStart + 3, to: lastTextStart + 3, with: "!")
+        let atEnd = try ReplaceStep(from: lastTextStart + 3, to: lastTextStart + 3, insertText: "!").apply(to: document).document
         assertIndexMatchesRebuild(atEnd, "insertion in last block")
     }
 
     func testMarkedInsertionDerivesIndex() throws {
         let textStart = document.position(ofTextInBlockAt: 1)!
-        let marked = try document.replacingText(
-            from: textStart + 6, to: textStart + 6, with: "bold", marks: [Mark(type: "bold")]
-        )
+        let marked = try ReplaceStep(
+            from: textStart + 6, to: textStart + 6, insertText: "bold", insertMarks: [Mark(type: "bold")]
+        ).apply(to: document).document
         assertIndexMatchesRebuild(marked, "marked insertion")
     }
 

@@ -100,18 +100,6 @@ public struct Document: Codable, Hashable, Sendable {
         )
     }
 
-    /// Document adopting `newRoot`, which differs from the current root only
-    /// in the block at `blockIndex`; same index derivation as above.
-    private func replacing(root newRoot: Node, blockAt blockIndex: Int) -> Document {
-        Document(
-            root: newRoot,
-            index: derivedIndex(
-                replacingBlocksIn: blockIndex..<(blockIndex + 1),
-                with: [newRoot.content[blockIndex]]
-            )
-        )
-    }
-
     private func derivedIndex(replacingBlocksIn range: Range<Int>, with newBlocks: [Node]) -> BlockIndex {
         var starts = index.blockStarts
         var textCounts = index.blockTextCounts
@@ -243,50 +231,6 @@ public struct Document: Codable, Hashable, Sendable {
             throw StepError.unsupportedReplacement("replacement range must stay inside one text node")
         }
         return String(range.text[range.range])
-    }
-
-    public func replacingText(from: Position, to: Position, with insertedText: String, marks: [Mark] = []) throws -> Document {
-        guard let range = textRange(from: from, to: to) else {
-            // The range crosses a run or block boundary; merge across it.
-            return try replacingAcrossRuns(from: from, to: to, with: insertedText, marks: marks)
-        }
-        if !marks.isEmpty, from == to, range.path.count == 2 {
-            let offset = range.text.distance(from: range.text.startIndex, to: range.range.lowerBound)
-            return replacing(
-                root: root.splicingTextNode(
-                    atPath: range.path,
-                    replacing: offset..<offset,
-                    withText: insertedText,
-                    marks: marks
-                ),
-                blockAt: range.path[0]
-            )
-        }
-        var updated = range.text
-        updated.replaceSubrange(range.range, with: insertedText)
-        let newRoot = root.replacingTextNode(atPath: range.path, with: updated)
-        guard range.path.count == 2 else { return Document(newRoot) }
-        return replacing(root: newRoot, blockAt: range.path[0])
-    }
-
-    /// Replacement whose range crosses a text-run or block boundary: the
-    /// blocks at the ends merge into one block of the first's type, keeping
-    /// the runs outside the range — ProseMirror's replace semantics. This is
-    /// what Backspace at a block start becomes when the keyboard deletes the
-    /// boundary "\n" in character space, and what typing over a selection
-    /// spanning blocks does.
-    private func replacingAcrossRuns(from: Position, to: Position, with insertedText: String, marks: [Mark]) throws -> Document {
-        guard from <= to,
-              let fromInfo = blockInfo(containing: from),
-              let toInfo = blockInfo(containing: to),
-              fromInfo.index <= toInfo.index else {
-            throw StepError.unsupportedReplacement("replacement range must lie within the document's text")
-        }
-        let head = fromInfo.node.inlineRuns(upTo: from - (fromInfo.start + 1))
-        let tail = toInfo.node.inlineRuns(from: to - (toInfo.start + 1))
-        let inserted: [Node] = insertedText.isEmpty ? [] : [.text(insertedText, marks: marks)]
-        let merged = fromInfo.node.withContent(head + inserted + tail)
-        return replacingBlocks(in: fromInfo.index..<(toInfo.index + 1), with: [merged])
     }
 
     /// Whether the whole `from..<to` range carries `mark`. A query (toolbar
