@@ -21,8 +21,11 @@ private func splitBlock(
         .map { Node(type: $0, attrs: blockAttrs ?? [:], content: [.text(String(text[splitIndex...]))]) }
         ?? info.node.withContent([.text(String(text[splitIndex...]))])
     let newBlockStart = info.start + first.nodeSize
+    // Split within the leaf's own container (the root, for a flat document).
+    let childIndex = info.path.last ?? info.index
+    let parentPath = Array(info.path.dropLast())
     return StepApplication(
-        document: document.replacingBlocks(in: info.index..<(info.index + 1), with: [first, second]),
+        document: document.replacingBlocks(at: parentPath, childRange: childIndex..<(childIndex + 1), with: [first, second]),
         changedRange: info.start..<(newBlockStart + second.nodeSize)
     )
 }
@@ -63,21 +66,32 @@ public struct SplitBlockStep: Step, Codable, Equatable, Sendable {
 /// predecessor (Marks preserved). Returns nil when `position` is not the start
 /// of a non-first block. Built on the block-replace primitive.
 private func joinBackward(in document: Document, at position: Position) -> StepApplication? {
-    guard let info = document.blockInfo(containing: position), info.index > 0, position == info.start + 1 else {
+    guard let info = document.blockInfo(containing: position), position == info.start + 1 else {
         return nil
     }
-    let previous = document.root.content[info.index - 1]
-    let current = document.root.content[info.index]
+    // Join into the previous sibling within the leaf's own container. A leaf
+    // that is the first child of its container has no previous sibling — it is
+    // lifted out, not joined (handled by the lift path), so bail here.
+    let childIndex = info.path.last ?? info.index
+    guard childIndex > 0 else { return nil }
+    let parentPath = Array(info.path.dropLast())
+    let parent = document.node(atPath: parentPath)
+    let previous = parent.content[childIndex - 1]
+    let current = parent.content[childIndex]
+    // The previous sibling must be a textblock to absorb this block's runs;
+    // merging into a container is a different operation (not slice 03).
+    guard previous.isTextblock else { return nil }
     let previousTextEnd = info.start - 1
 
     let joined: Document
     if document.textCount(ofBlockAt: info.index) == 0 {
-        joined = document.replacingBlocks(in: info.index..<(info.index + 1), with: [])
+        joined = document.replacingBlocks(at: parentPath, childRange: childIndex..<(childIndex + 1), with: [])
     } else {
         // Concatenating the runs (not the plain text) keeps both blocks'
-        // Marks across the join, like ProseMirror.
-        let merged = previous.withContent(previous.content + current.content)
-        joined = document.replacingBlocks(in: (info.index - 1)..<(info.index + 1), with: [merged])
+        // Marks across the join; coalescing adjacent same-Mark runs normalizes
+        // like ProseMirror, so a join inverts a split exactly.
+        let merged = previous.withContent(Node.coalescedRuns(previous.content + current.content))
+        joined = document.replacingBlocks(at: parentPath, childRange: (childIndex - 1)..<(childIndex + 1), with: [merged])
     }
 
     return StepApplication(
