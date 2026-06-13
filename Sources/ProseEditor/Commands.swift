@@ -19,7 +19,23 @@ public enum Commands {
     public static func splitBlock() -> Command {
         Command { state in
             guard state.selection.isCollapsed else { return false }
-            let step = SplitBlockStep(at: state.selection.head)
+            let step: any Step
+            if let info = state.document.blockInfo(containing: state.selection.head),
+               info.path.count >= 3 {
+                let itemPath = Array(info.path.dropLast())
+                let listPath = Array(itemPath.dropLast())
+                let item = state.document.node(atPath: itemPath)
+                let list = state.document.node(atPath: listPath)
+                if item.type == "listItem", list.type == "bulletList" {
+                    step = info.node.plainText.isEmpty && state.selection.head == info.start + 1
+                        ? LiftListItemStep(at: state.selection.head)
+                        : SplitListItemStep(at: state.selection.head)
+                } else {
+                    step = SplitBlockStep(at: state.selection.head)
+                }
+            } else {
+                step = SplitBlockStep(at: state.selection.head)
+            }
             let caret = step.map(state.selection.head)
             try state.dispatch(Transaction(
                 steps: [step],
@@ -32,11 +48,30 @@ public enum Commands {
 
     public static func joinBackward() -> Command {
         Command { state in
-            guard state.selection.isCollapsed,
-                  state.document.canJoinBackward(at: state.selection.head) else {
+            guard state.selection.isCollapsed else {
                 return false
             }
-            let step = JoinBlocksStep(at: state.selection.head)
+            let step: any Step
+            if let info = state.document.blockInfo(containing: state.selection.head),
+               state.selection.head == info.start + 1,
+               info.path.count >= 3 {
+                let itemPath = Array(info.path.dropLast())
+                let listPath = Array(itemPath.dropLast())
+                let item = state.document.node(atPath: itemPath)
+                let list = state.document.node(atPath: listPath)
+                if item.type == "listItem", list.type == "bulletList",
+                   (itemPath.last ?? 0) > 0, (info.path.last ?? 0) == 0 {
+                    step = JoinListItemsStep(at: state.selection.head)
+                } else if state.document.canJoinBackward(at: state.selection.head) {
+                    step = JoinBlocksStep(at: state.selection.head)
+                } else {
+                    return false
+                }
+            } else if state.document.canJoinBackward(at: state.selection.head) {
+                step = JoinBlocksStep(at: state.selection.head)
+            } else {
+                return false
+            }
             let caret = step.map(state.selection.head)
             try state.dispatch(Transaction(
                 steps: [step],
@@ -59,12 +94,19 @@ public enum Commands {
                   info.path.count >= 2 else {
                 return false
             }
-            // Only blockquote lifts a textblock straight to its parent. Lifting a
-            // list item's paragraph out of its listItem would violate the schema
-            // (a bulletList holds only listItems); list-aware lift is its own slice.
             let container = state.document.node(atPath: Array(info.path.dropLast()))
-            guard container.type == "blockquote" else { return false }
-            let step = LiftStep(blockRange: info.start..<(info.start + info.node.nodeSize))
+            let step: any Step
+            if container.type == "blockquote" {
+                step = LiftStep(blockRange: info.start..<(info.start + info.node.nodeSize))
+            } else if container.type == "listItem", info.path.count >= 3 {
+                let itemPath = Array(info.path.dropLast())
+                let listPath = Array(itemPath.dropLast())
+                let list = state.document.node(atPath: listPath)
+                guard list.type == "bulletList", (itemPath.last ?? 0) == 0 else { return false }
+                step = LiftListItemStep(at: state.selection.head)
+            } else {
+                return false
+            }
             let caret = step.map(state.selection.head)
             try state.dispatch(Transaction(
                 steps: [step],
