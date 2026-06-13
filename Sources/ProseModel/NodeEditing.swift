@@ -30,11 +30,21 @@ extension Node {
     /// runs that retain the original Marks. Empty runs are dropped. The one
     /// splice behind both marked insertion and mark add/remove.
     func splicingTextNode(atPath path: [Int], replacing range: Range<Int>, withText middle: String, marks middleMarks: [Mark]) -> Node {
-        guard path.count == 2 else { return self }
+        guard let first = path.first else { return self }
         var copy = self
-        let blockIndex = path[0]
-        let textIndex = path[1]
-        let original = copy.content[blockIndex].content[textIndex]
+        guard path.count == 1 else {
+            // Descend toward the leaf block holding the text run.
+            copy.content[first] = copy.content[first].splicingTextNode(
+                atPath: Array(path.dropFirst()),
+                replacing: range,
+                withText: middle,
+                marks: middleMarks
+            )
+            return copy
+        }
+        // `first` is the text-run index within this leaf block.
+        let textIndex = first
+        let original = copy.content[textIndex]
         let text = original.text ?? ""
         let lower = text.index(text.startIndex, offsetBy: range.lowerBound)
         let upper = text.index(text.startIndex, offsetBy: range.upperBound)
@@ -50,7 +60,7 @@ extension Node {
         if !after.isEmpty {
             replacement.append(.text(after, marks: original.marks))
         }
-        copy.content[blockIndex].content.replaceSubrange(textIndex...textIndex, with: replacement)
+        copy.content.replaceSubrange(textIndex...textIndex, with: replacement)
         return copy
     }
 
@@ -99,11 +109,10 @@ extension Node {
     }
 
     func textNode(atPath path: [Int]) -> Node? {
-        guard path.count == 2,
-              content.indices.contains(path[0]),
-              content[path[0]].content.indices.contains(path[1]) else {
-            return nil
+        guard let first = path.first, content.indices.contains(first) else { return nil }
+        if path.count == 1 {
+            return content[first].isText ? content[first] : nil
         }
-        return content[path[0]].content[path[1]]
+        return content[first].textNode(atPath: Array(path.dropFirst()))
     }
 }

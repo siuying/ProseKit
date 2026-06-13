@@ -113,6 +113,14 @@ public struct Document: Codable, Hashable, Sendable {
         index.blockStarts.count
     }
 
+    /// True when every leaf block is a direct child of the root (depth 1) — a
+    /// flat document. The keystroke fast paths (index derivation, layout) key
+    /// on this; nested documents take correct-but-unoptimized paths until the
+    /// later block-nesting slices.
+    public var isFlat: Bool {
+        index.isFlat
+    }
+
     /// The leaf block at leaf-order index `i`, fetched by walking its path. The
     /// tree is the authority; the index stores only the path.
     func leafNode(_ i: Int) -> Node {
@@ -307,6 +315,10 @@ public struct Document: Codable, Hashable, Sendable {
     /// rather than moving into a Step ("where is this text node" is a read).
     func textRange(from: Position, to: Position) -> TextRange? {
         guard let info = blockInfo(containing: from) else { return nil }
+        // The full path from the root to the text run: the leaf's container path
+        // plus the run's index within the leaf. For a flat document this is just
+        // [blockIndex, runIndex], unchanged.
+        let leafPath = index.leafPaths[info.index]
         var textStart = info.start + 1
         for (childIndex, child) in info.node.content.enumerated() where child.isText {
             let text = child.text ?? ""
@@ -314,7 +326,7 @@ public struct Document: Codable, Hashable, Sendable {
             if from >= textStart, to <= textEnd {
                 let startIndex = text.index(text.startIndex, offsetBy: from - textStart)
                 let endIndex = text.index(text.startIndex, offsetBy: to - textStart)
-                return TextRange(path: [info.index, childIndex], text: text, range: startIndex..<endIndex)
+                return TextRange(path: leafPath + [childIndex], text: text, range: startIndex..<endIndex)
             }
             textStart = textEnd
         }
