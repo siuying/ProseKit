@@ -16,6 +16,10 @@ public struct Command: Sendable {
 /// and placing the Selection — then dispatch a Transaction. The Document only
 /// applies Steps; it never chooses.
 public enum Commands {
+    private static func isListType(_ type: String) -> Bool {
+        type == "bulletList" || type == "orderedList"
+    }
+
     public static func splitBlock() -> Command {
         Command { state in
             guard state.selection.isCollapsed else { return false }
@@ -26,7 +30,7 @@ public enum Commands {
                 let listPath = Array(itemPath.dropLast())
                 let item = state.document.node(atPath: itemPath)
                 let list = state.document.node(atPath: listPath)
-                if item.type == "listItem", list.type == "bulletList" {
+                if item.type == "listItem", isListType(list.type) {
                     step = info.node.plainText.isEmpty && state.selection.head == info.start + 1
                         ? LiftListItemStep(at: state.selection.head)
                         : SplitListItemStep(at: state.selection.head)
@@ -59,7 +63,7 @@ public enum Commands {
                 let listPath = Array(itemPath.dropLast())
                 let item = state.document.node(atPath: itemPath)
                 let list = state.document.node(atPath: listPath)
-                if item.type == "listItem", list.type == "bulletList",
+                if item.type == "listItem", isListType(list.type),
                    (itemPath.last ?? 0) > 0, (info.path.last ?? 0) == 0 {
                     step = JoinListItemsStep(at: state.selection.head)
                 } else if state.document.canJoinBackward(at: state.selection.head) {
@@ -102,10 +106,65 @@ public enum Commands {
                 let itemPath = Array(info.path.dropLast())
                 let listPath = Array(itemPath.dropLast())
                 let list = state.document.node(atPath: listPath)
-                guard list.type == "bulletList", (itemPath.last ?? 0) == 0 else { return false }
+                guard isListType(list.type), (itemPath.last ?? 0) == 0 else { return false }
                 step = LiftListItemStep(at: state.selection.head)
             } else {
                 return false
+            }
+            let caret = step.map(state.selection.head)
+            try state.dispatch(Transaction(
+                steps: [step],
+                selection: TextSelection(anchor: caret, head: caret),
+                origin: .local
+            ))
+            return true
+        }
+    }
+
+    public static func sinkListItem() -> Command {
+        Command { state in
+            guard state.selection.isCollapsed,
+                  let info = state.document.blockInfo(containing: state.selection.head),
+                  state.selection.head == info.start + 1,
+                  info.path.count >= 3 else {
+                return false
+            }
+            let itemPath = Array(info.path.dropLast())
+            let listPath = Array(itemPath.dropLast())
+            let item = state.document.node(atPath: itemPath)
+            let list = state.document.node(atPath: listPath)
+            guard item.type == "listItem", isListType(list.type), (itemPath.last ?? 0) > 0 else {
+                return false
+            }
+            let step = SinkListItemStep(at: state.selection.head)
+            let caret = step.map(state.selection.head)
+            try state.dispatch(Transaction(
+                steps: [step],
+                selection: TextSelection(anchor: caret, head: caret),
+                origin: .local
+            ))
+            return true
+        }
+    }
+
+    public static func liftListItem() -> Command {
+        Command { state in
+            guard state.selection.isCollapsed,
+                  let info = state.document.blockInfo(containing: state.selection.head),
+                  state.selection.head == info.start + 1,
+                  info.path.count >= 3 else {
+                return false
+            }
+            let itemPath = Array(info.path.dropLast())
+            let listPath = Array(itemPath.dropLast())
+            let item = state.document.node(atPath: itemPath)
+            let list = state.document.node(atPath: listPath)
+            guard item.type == "listItem", isListType(list.type) else { return false }
+            let step: any Step
+            if info.path.count >= 5 {
+                step = LiftNestedListItemStep(at: state.selection.head)
+            } else {
+                step = LiftListItemStep(at: state.selection.head)
             }
             let caret = step.map(state.selection.head)
             try state.dispatch(Transaction(

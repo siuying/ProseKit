@@ -59,4 +59,28 @@ final class BulletListLayoutTests: XCTestCase {
         let decoded = try JSONDecoder().decode(Document.self, from: data)
         XCTAssertEqual(decoded, document)
     }
+
+    func testOrderedListValidatesAndRoundTripsThroughJSON() throws {
+        let document = Document(.doc([
+            .orderedList(start: 3, [.listItem([.paragraph([.text("third")])])]),
+        ]))
+        XCTAssertNoThrow(try Schema.slice1.validate(document))
+        let data = try JSONEncoder().encode(document)
+        let decoded = try JSONDecoder().decode(Document.self, from: data)
+        XCTAssertEqual(decoded, document)
+    }
+
+    func testOrderedListLayoutsLikeAListContainer() throws {
+        let document = Document(.doc([
+            .orderedList([
+                .listItem([.paragraph([.text("first")])]),
+                .listItem([.paragraph([.text("second")])]),
+            ]),
+        ]))
+        var store = IncrementalLayoutStore(schema: .slice1, width: 320)
+        let root = try store.layout(document)
+        XCTAssertEqual(root.children[0].node.type, "orderedList")
+        XCTAssertEqual(root.children[0].children.map { $0.node.type }, ["listItem", "listItem"])
+        XCTAssertEqual(root.leaves.map { $0.node.plainText }, ["first", "second"])
+    }
 }

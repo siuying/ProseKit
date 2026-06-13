@@ -378,6 +378,8 @@ import UIKit
     public func setLink(_ href: String) { runCommand(Commands.setLink(href: href)) }
     public func setTextAlign(_ value: String?) { runCommand(Commands.setTextAlign(value)) }
     public func setBlockType(headingLevel level: Int?) { runCommand(Commands.setBlockType(headingLevel: level)) }
+    public func sinkListItem() { runCommand(Commands.sinkListItem()) }
+    public func liftListItem() { runCommand(Commands.liftListItem()) }
 
     // MARK: - Active state (toolbar binding)
 
@@ -460,6 +462,8 @@ import UIKit
         let commands = [
             UIKeyCommand(input: "b", modifierFlags: .command, action: #selector(toggleBoldFromKeyCommand)),
             UIKeyCommand(input: "i", modifierFlags: .command, action: #selector(toggleItalicFromKeyCommand)),
+            UIKeyCommand(input: "\t", modifierFlags: [], action: #selector(sinkListItemFromKeyCommand)),
+            UIKeyCommand(input: "\t", modifierFlags: .shift, action: #selector(liftListItemFromKeyCommand)),
         ]
         // Without priority, the system routes ⌘B/⌘I to the standard edit
         // actions instead of these commands.
@@ -483,6 +487,14 @@ import UIKit
 
     @objc private func toggleItalicFromKeyCommand() {
         toggleMark(.italic)
+    }
+
+    @objc private func sinkListItemFromKeyCommand() {
+        sinkListItem()
+    }
+
+    @objc private func liftListItemFromKeyCommand() {
+        liftListItem()
     }
 
     public override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
