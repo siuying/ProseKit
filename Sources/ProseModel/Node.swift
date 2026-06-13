@@ -63,6 +63,14 @@ public struct Node: Codable, Hashable, Sendable {
         Node(type: "blockquote", content: content)
     }
 
+    public static func bulletList(_ items: [Node]) -> Node {
+        Node(type: "bulletList", content: items)
+    }
+
+    public static func listItem(_ content: [Node]) -> Node {
+        Node(type: "listItem", content: content)
+    }
+
     public func withContent(_ content: [Node]) -> Node {
         Node(type: type, attrs: attrs, content: content, text: text, marks: marks)
     }

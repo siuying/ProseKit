@@ -16,7 +16,10 @@ extension NodeRule {
 }
 
 enum NodeRules {
-    static let all: [any NodeRule] = [DocRule(), ParagraphRule(), HeadingRule(), BlockquoteRule()]
+    static let all: [any NodeRule] = [
+        DocRule(), ParagraphRule(), HeadingRule(), BlockquoteRule(),
+        BulletListRule(), ListItemRule(),
+    ]
 
     static func rule(for type: String) -> (any NodeRule)? {
         all.first { $0.type == type }

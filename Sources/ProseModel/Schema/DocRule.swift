@@ -3,7 +3,9 @@ struct DocRule: NodeRule {
 
     func validate(_ node: Node) throws {
         try require(
-            node.content.allSatisfy { $0.type == "paragraph" || $0.type == "heading" || $0.type == "blockquote" },
+            node.content.allSatisfy {
+                ["paragraph", "heading", "blockquote", "bulletList"].contains($0.type)
+            },
             "\(type) may only contain block nodes"
         )
     }

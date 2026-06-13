@@ -59,6 +59,11 @@ public enum Commands {
                   info.path.count >= 2 else {
                 return false
             }
+            // Only blockquote lifts a textblock straight to its parent. Lifting a
+            // list item's paragraph out of its listItem would violate the schema
+            // (a bulletList holds only listItems); list-aware lift is its own slice.
+            let container = state.document.node(atPath: Array(info.path.dropLast()))
+            guard container.type == "blockquote" else { return false }
             let step = LiftStep(blockRange: info.start..<(info.start + info.node.nodeSize))
             let caret = step.map(state.selection.head)
             try state.dispatch(Transaction(

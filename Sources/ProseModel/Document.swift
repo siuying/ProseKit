@@ -172,7 +172,7 @@ public struct Document: Codable, Hashable, Sendable {
     }
 
     /// The node at `path` (root-to-node child indices); the root when empty.
-    func node(atPath path: [Int]) -> Node {
+    public func node(atPath path: [Int]) -> Node {
         var node = root
         for childIndex in path {
             node = node.content[childIndex]
