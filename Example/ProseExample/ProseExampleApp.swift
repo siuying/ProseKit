@@ -120,6 +120,13 @@ private struct Demo: Identifiable, Hashable {
             makeDocument: { .orderedList }
         ),
         Demo(
+            id: "tasks",
+            title: "Task List",
+            subtitle: "Checkable items — tap a checkbox to toggle its checked attr",
+            icon: "checklist",
+            makeDocument: { .taskList }
+        ),
+        Demo(
             id: "large",
             title: "Large Document",
             subtitle: "2,000 paragraphs: fling scrolling, keyboard avoidance, responsive typing",
@@ -544,6 +551,17 @@ extension Document {
             .listItem([.paragraph([.text("Third step, back at the outer level.")])]),
         ]),
         .paragraph([.text("Press Tab at an item's start to sink it; Shift-Tab lifts it back out.")]),
+    ]))
+
+    fileprivate static let taskList = Document(.doc([
+        .heading(level: 1, [.text("Task List")]),
+        .paragraph([.text("A task list holds checkable items. Tap a checkbox to toggle its checked state:")]),
+        .taskList([
+            .taskItem(checked: true, [.paragraph([.text("A finished task — checked.")])]),
+            .taskItem(checked: false, [.paragraph([.text("A task still to do.")])]),
+            .taskItem(checked: false, [.paragraph([.text("Another open task, a little longer so the checkbox stays aligned to the first line.")])]),
+        ]),
+        .paragraph([.text("The checked attr survives split, join, sink and lift just like any list item.")]),
     ]))
 
     fileprivate static let structure = Document(.doc([
