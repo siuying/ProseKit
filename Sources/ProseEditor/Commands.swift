@@ -47,6 +47,47 @@ public enum Commands {
         }
     }
 
+    /// Lifts the block at the caret out of its container, when the caret is at
+    /// the text start of the container's first child (Backspace there unwraps,
+    /// rather than joining — there is no previous sibling to join into).
+    public static func liftOutOfContainer() -> Command {
+        Command { state in
+            guard state.selection.isCollapsed,
+                  let info = state.document.blockInfo(containing: state.selection.head),
+                  state.selection.head == info.start + 1,
+                  (info.path.last ?? 0) == 0,
+                  info.path.count >= 2 else {
+                return false
+            }
+            let step = LiftStep(blockRange: info.start..<(info.start + info.node.nodeSize))
+            let caret = step.map(state.selection.head)
+            try state.dispatch(Transaction(
+                steps: [step],
+                selection: TextSelection(anchor: caret, head: caret),
+                origin: .local
+            ))
+            return true
+        }
+    }
+
+    /// Wraps the block at the caret in a blockquote (the headless side of a
+    /// blockquote toolbar button and of the `> ` input rule).
+    public static func wrapInBlockquote() -> Command {
+        Command { state in
+            guard let info = state.document.blockInfo(containing: state.selection.head) else { return false }
+            let step = WrapInStep(
+                blockRange: info.start..<(info.start + info.node.nodeSize),
+                containerType: "blockquote"
+            )
+            try state.dispatch(Transaction(
+                steps: [step],
+                selection: TextSelection(anchor: step.map(state.selection.anchor), head: step.map(state.selection.head)),
+                origin: .local
+            ))
+            return true
+        }
+    }
+
     /// A heading of any level toggles back to a paragraph; a paragraph becomes
     /// a heading of `level`.
     public static func toggleHeading(level: Int) -> Command {

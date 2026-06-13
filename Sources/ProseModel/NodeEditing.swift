@@ -10,6 +10,38 @@ extension Node {
         return content.contains { $0.containsText(needle) }
     }
 
+    /// Replaces `range` of the children of the container at `path`
+    /// (root-to-container child indices; empty = this node) with `newChildren`.
+    /// Concatenated inline runs with adjacent text runs carrying identical Marks
+    /// coalesced into one — ProseMirror normalizes text nodes this way, so a
+    /// join that re-merges what a split divided round-trips exactly.
+    static func coalescedRuns(_ runs: [Node]) -> [Node] {
+        var result: [Node] = []
+        for run in runs {
+            if run.isText, let last = result.last, last.isText, last.marks == run.marks {
+                result[result.count - 1] = .text((last.text ?? "") + (run.text ?? ""), marks: last.marks)
+            } else {
+                result.append(run)
+            }
+        }
+        return result
+    }
+
+    func replacingChildren(atPath path: [Int], range: Range<Int>, with newChildren: [Node]) -> Node {
+        guard let first = path.first else {
+            var copy = self
+            copy.content.replaceSubrange(range, with: newChildren)
+            return copy
+        }
+        var copy = self
+        copy.content[first] = copy.content[first].replacingChildren(
+            atPath: Array(path.dropFirst()),
+            range: range,
+            with: newChildren
+        )
+        return copy
+    }
+
     func replacingTextNode(atPath path: [Int], with text: String) -> Node {
         guard let index = path.first else {
             var copy = self

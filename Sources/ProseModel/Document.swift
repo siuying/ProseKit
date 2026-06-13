@@ -157,6 +157,29 @@ public struct Document: Codable, Hashable, Sendable {
         )
     }
 
+    /// Path-addressed block replace: replaces `childRange` of the container at
+    /// `parentPath` (root-to-container child indices; empty = the root itself)
+    /// with `newBlocks`. The structural Steps build on this to edit within a
+    /// container at any depth. Top-level edits (`parentPath` empty) keep the
+    /// flat fast path; deeper edits rebuild the leaf tiling (incremental nested
+    /// derivation is a later slice).
+    func replacingBlocks(at parentPath: [Int], childRange: Range<Int>, with newBlocks: [Node]) -> Document {
+        guard !parentPath.isEmpty else {
+            return replacingBlocks(in: childRange, with: newBlocks)
+        }
+        let newRoot = root.replacingChildren(atPath: parentPath, range: childRange, with: newBlocks)
+        return Document(root: newRoot, index: Self.makeIndex(of: newRoot))
+    }
+
+    /// The node at `path` (root-to-node child indices); the root when empty.
+    func node(atPath path: [Int]) -> Node {
+        var node = root
+        for childIndex in path {
+            node = node.content[childIndex]
+        }
+        return node
+    }
+
     private func derivedIndex(replacingBlocksIn range: Range<Int>, with newBlocks: [Node]) -> BlockIndex {
         var starts = index.blockStarts
         var textCounts = index.blockTextCounts
@@ -271,15 +294,22 @@ public struct Document: Codable, Hashable, Sendable {
             if starts[mid] <= position { low = mid } else { high = mid - 1 }
         }
         let blockIndex = (low > 0 && starts[low] == position) ? low - 1 : low
-        return BlockInfo(index: blockIndex, node: leafNode(blockIndex), start: starts[blockIndex])
+        return BlockInfo(
+            index: blockIndex,
+            node: leafNode(blockIndex),
+            start: starts[blockIndex],
+            path: index.leafPaths[blockIndex]
+        )
     }
 
-    /// Whether `position` is the first text position of a non-first block —
-    /// the precondition for a backward join (see `JoinBlocksStep`). A query, so
-    /// it stays on Document; `Commands.joinBackward` gates on it.
+    /// Whether `position` is the first text position of a leaf that has a
+    /// previous sibling in its own container — the precondition for a backward
+    /// join into that sibling (see `JoinBlocksStep`). A leaf that is the first
+    /// child of its container is lifted, not joined, and is handled separately.
+    /// A query, so it stays on Document; `Commands.joinBackward` gates on it.
     public func canJoinBackward(at position: Position) -> Bool {
         guard let info = blockInfo(containing: position) else { return false }
-        return info.index > 0 && position == info.start + 1
+        return (info.path.last ?? 0) > 0 && position == info.start + 1
     }
 
     /// The Position of the first text character in the block containing
@@ -346,11 +376,15 @@ public struct BlockInfo: Equatable, Sendable {
     public var index: Int
     public var node: Node
     public var start: Position
+    /// The leaf's child-index path from the root; its last element is the leaf's
+    /// index within its own container, and dropping it gives the container path.
+    public var path: [Int]
 
-    public init(index: Int, node: Node, start: Position) {
+    public init(index: Int, node: Node, start: Position, path: [Int] = []) {
         self.index = index
         self.node = node
         self.start = start
+        self.path = path
     }
 }
 

@@ -21,8 +21,11 @@ private func splitBlock(
         .map { Node(type: $0, attrs: blockAttrs ?? [:], content: [.text(String(text[splitIndex...]))]) }
         ?? info.node.withContent([.text(String(text[splitIndex...]))])
     let newBlockStart = info.start + first.nodeSize
+    // Split within the leaf's own container (the root, for a flat document).
+    let childIndex = info.path.last ?? info.index
+    let parentPath = Array(info.path.dropLast())
     return StepApplication(
-        document: document.replacingBlocks(in: info.index..<(info.index + 1), with: [first, second]),
+        document: document.replacingBlocks(at: parentPath, childRange: childIndex..<(childIndex + 1), with: [first, second]),
         changedRange: info.start..<(newBlockStart + second.nodeSize)
     )
 }
@@ -63,21 +66,32 @@ public struct SplitBlockStep: Step, Codable, Equatable, Sendable {
 /// predecessor (Marks preserved). Returns nil when `position` is not the start
 /// of a non-first block. Built on the block-replace primitive.
 private func joinBackward(in document: Document, at position: Position) -> StepApplication? {
-    guard let info = document.blockInfo(containing: position), info.index > 0, position == info.start + 1 else {
+    guard let info = document.blockInfo(containing: position), position == info.start + 1 else {
         return nil
     }
-    let previous = document.root.content[info.index - 1]
-    let current = document.root.content[info.index]
+    // Join into the previous sibling within the leaf's own container. A leaf
+    // that is the first child of its container has no previous sibling — it is
+    // lifted out, not joined (handled by the lift path), so bail here.
+    let childIndex = info.path.last ?? info.index
+    guard childIndex > 0 else { return nil }
+    let parentPath = Array(info.path.dropLast())
+    let parent = document.node(atPath: parentPath)
+    let previous = parent.content[childIndex - 1]
+    let current = parent.content[childIndex]
+    // The previous sibling must be a textblock to absorb this block's runs;
+    // merging into a container is a different operation (not slice 03).
+    guard previous.isTextblock else { return nil }
     let previousTextEnd = info.start - 1
 
     let joined: Document
     if document.textCount(ofBlockAt: info.index) == 0 {
-        joined = document.replacingBlocks(in: info.index..<(info.index + 1), with: [])
+        joined = document.replacingBlocks(at: parentPath, childRange: childIndex..<(childIndex + 1), with: [])
     } else {
         // Concatenating the runs (not the plain text) keeps both blocks'
-        // Marks across the join, like ProseMirror.
-        let merged = previous.withContent(previous.content + current.content)
-        joined = document.replacingBlocks(in: (info.index - 1)..<(info.index + 1), with: [merged])
+        // Marks across the join; coalescing adjacent same-Mark runs normalizes
+        // like ProseMirror, so a join inverts a split exactly.
+        let merged = previous.withContent(Node.coalescedRuns(previous.content + current.content))
+        joined = document.replacingBlocks(at: parentPath, childRange: (childIndex - 1)..<(childIndex + 1), with: [merged])
     }
 
     return StepApplication(
@@ -200,5 +214,103 @@ public struct SetTextAlignStep: Step, Codable, Equatable, Sendable {
 
     public func map(_ position: Position) -> Position {
         position
+    }
+}
+
+/// Wraps the single block whose node range is `blockRange` into a new container
+/// of `containerType` (e.g. a paragraph into a blockquote). The block keeps its
+/// content; a container open/close token pair is added around it.
+public struct WrapInStep: Step, Codable, Equatable, Sendable {
+    public var blockRange: Range<Position>
+    public var containerType: String
+
+    public init(blockRange: Range<Position>, containerType: String) {
+        self.blockRange = blockRange
+        self.containerType = containerType
+    }
+
+    public func apply(to document: Document) throws -> StepApplication {
+        guard let info = document.blockInfo(containing: blockRange.lowerBound + 1),
+              info.start == blockRange.lowerBound else {
+            throw StepError.unsupportedReplacement("wrap requires the block at the given range")
+        }
+        let childIndex = info.path.last ?? info.index
+        let parentPath = Array(info.path.dropLast())
+        let wrapper = Node(type: containerType, content: [info.node])
+        return StepApplication(
+            document: document.replacingBlocks(at: parentPath, childRange: childIndex..<(childIndex + 1), with: [wrapper]),
+            changedRange: info.start..<(info.start + wrapper.nodeSize)
+        )
+    }
+
+    public func inverted(in document: Document) throws -> any Step {
+        // After wrapping, the block sits one Position deeper (past the new
+        // container's opening token); lifting it there restores the original.
+        LiftStep(blockRange: (blockRange.lowerBound + 1)..<(blockRange.upperBound + 1))
+    }
+
+    /// Wrap inserts the container's opening token before the block and its
+    /// closing token after it.
+    public func map(_ position: Position) -> Position {
+        if position <= blockRange.lowerBound { return position }
+        if position < blockRange.upperBound { return position + 1 }
+        return position + 2
+    }
+}
+
+/// Lifts the block whose node range is `blockRange` — which must be the first
+/// child of its container — out to the container's own parent, before the
+/// container. If it was the container's only child, the now-empty container is
+/// removed; otherwise the container keeps its remaining children.
+public struct LiftStep: Step, Codable, Equatable, Sendable {
+    public var blockRange: Range<Position>
+
+    public init(blockRange: Range<Position>) {
+        self.blockRange = blockRange
+    }
+
+    public func apply(to document: Document) throws -> StepApplication {
+        guard let info = document.blockInfo(containing: blockRange.lowerBound + 1),
+              info.start == blockRange.lowerBound,
+              (info.path.last ?? 0) == 0, info.path.count >= 2 else {
+            throw StepError.unsupportedReplacement("lift requires the first child of a container")
+        }
+        let containerPath = Array(info.path.dropLast())
+        let container = document.node(atPath: containerPath)
+        let grandparentPath = Array(containerPath.dropLast())
+        let containerIndex = containerPath.last ?? 0
+        let leaf = container.content[0]
+        let remaining = Array(container.content.dropFirst())
+        let replacement = remaining.isEmpty ? [leaf] : [leaf, container.withContent(remaining)]
+        let containerStart = info.start - 1
+        return StepApplication(
+            document: document.replacingBlocks(
+                at: grandparentPath,
+                childRange: containerIndex..<(containerIndex + 1),
+                with: replacement
+            ),
+            changedRange: containerStart..<(containerStart + container.nodeSize)
+        )
+    }
+
+    public func inverted(in document: Document) throws -> any Step {
+        guard let info = document.blockInfo(containing: blockRange.lowerBound + 1) else {
+            throw StepError.unsupportedReplacement("lift requires the first child of a container")
+        }
+        // The container we are lifting out of; re-wrapping into its type, at the
+        // block's lifted-up Position (one shallower), inverts the lift.
+        let containerType = document.node(atPath: Array(info.path.dropLast())).type
+        return WrapInStep(
+            blockRange: (blockRange.lowerBound - 1)..<(blockRange.upperBound - 1),
+            containerType: containerType
+        )
+    }
+
+    /// Lifting moves the block up one level, dropping the enclosing opening
+    /// token that preceded it.
+    public func map(_ position: Position) -> Position {
+        if position <= blockRange.lowerBound { return position }
+        if position < blockRange.upperBound { return position - 1 }
+        return position
     }
 }
