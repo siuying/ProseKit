@@ -120,6 +120,40 @@ final class ProseExampleUITests: XCTestCase {
         XCTAssertLessThan(timedType("c", label: "second char after Return"), budget)
     }
 
+    /// The formatting toolbar floats in the keyboard's inputAccessoryView and
+    /// re-runs its body on every editor-state change (each keystroke and caret
+    /// move bumps the editor's revision). Reintroducing `.id(revision)` would
+    /// give the toolbar a fresh identity each time, tearing down and rebuilding
+    /// the whole tree (three Menus included) — ~12× costlier per rebuild, the
+    /// main-thread hostage that made typing choppy on the simulator.
+    ///
+    /// XCUITest event synthesis (~0.8s/keystroke) swamps a ~5ms rebuild, so a
+    /// wall-clock typing test can't see this. Instead the app runs the real
+    /// toolbar through synchronous render passes in-process under
+    /// `-benchmark-toolbar` and reports ms/rebuild; this test reads that and
+    /// gates it. Measured ~0.4–0.6ms fixed vs ~5ms with `.id`, so the 3ms
+    /// budget separates them with healthy margin either way.
+    @MainActor
+    func testToolbarRebuildStaysCheap() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-benchmark-toolbar"]
+        app.launch()
+
+        let result = app.staticTexts["toolbar-rebuild-result"]
+        XCTAssertTrue(result.waitForExistence(timeout: 10))
+
+        // The benchmark replaces "running…" with "<ms> ms/rebuild over <n>".
+        let deadline = Date().addingTimeInterval(20)
+        while result.label.contains("running"), Date() < deadline {
+            usleep(100_000)
+        }
+
+        let label = result.label
+        print("[toolbar-rebuild] \(label)")
+        let ms = Double(label.split(separator: " ").first ?? "") ?? .infinity
+        XCTAssertLessThan(ms, 3.0, "toolbar rebuild regressed to \(label) — did `.id(revision)` come back?")
+    }
+
     /// Pins the cost ADR 0002 accepts: every scrolled frame repaints the
     /// Viewport-sized Canvas. The hitch/frame-time metric is the gate; the
     /// trailing keystroke proves the app is still responsive afterwards.
