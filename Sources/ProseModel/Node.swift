@@ -75,6 +75,14 @@ public struct Node: Codable, Hashable, Sendable {
         Node(type: "listItem", content: content)
     }
 
+    public static func taskList(_ items: [Node]) -> Node {
+        Node(type: "taskList", content: items)
+    }
+
+    public static func taskItem(checked: Bool = false, _ content: [Node]) -> Node {
+        Node(type: "taskItem", attrs: ["checked": .bool(checked)], content: content)
+    }
+
     public func withContent(_ content: [Node]) -> Node {
         Node(type: type, attrs: attrs, content: content, text: text, marks: marks)
     }

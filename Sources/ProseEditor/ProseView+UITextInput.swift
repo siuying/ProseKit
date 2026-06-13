@@ -17,7 +17,12 @@ extension ProseView {
                 lastTransaction: state.lastTransaction,
                 typingMarks: state.typingMarks
             )
-            canvas.setNeedsDisplay()
+            // No canvas repaint: the Canvas draws no selection-dependent
+            // content (the caret and selection overlay are the system's
+            // UITextInteraction chrome), so a selection change leaves every
+            // painted pixel identical. UITextInteraction drives setSelectedText
+            // Range many times a second during a drag, and a full-Viewport
+            // repaint per call was choppy on the simulator.
             inputDelegate?.selectionDidChange(self)
             onStateChange?()
         }

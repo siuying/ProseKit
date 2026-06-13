@@ -1,6 +1,7 @@
 import ProseEditor
 import ProseModel
 import SwiftUI
+import UIKit
 
 @main
 struct ProseExampleApp: App {
@@ -10,7 +11,13 @@ struct ProseExampleApp: App {
             // large synthetic document, for exercising editing performance at
             // document scale (used by the ProseExampleUITests live-keyboard
             // and fling-scrolling tests, which expect the editor at root).
-            if let count = Self.syntheticParagraphCount {
+            if CommandLine.arguments.contains("-benchmark-toolbar") {
+                // In-process benchmark of the formatting-toolbar rebuild cost
+                // per editor-state change. Runs the real toolbar through
+                // synchronous render passes so the measurement isn't swamped by
+                // XCUITest's ~0.8s/keystroke event-synthesis overhead.
+                ToolbarRebuildBenchmark()
+            } else if let count = Self.syntheticParagraphCount {
                 ProseEditorView(document: .synthetic(paragraphs: count))
                     .ignoresSafeArea(.keyboard)
             } else if CommandLine.arguments.contains("-simple") {
@@ -118,6 +125,13 @@ private struct Demo: Identifiable, Hashable {
             subtitle: "Ordinals derived from sibling index; Tab/Shift-Tab sink and lift to nest",
             icon: "list.number",
             makeDocument: { .orderedList }
+        ),
+        Demo(
+            id: "tasks",
+            title: "Task List",
+            subtitle: "Checkable items — tap a checkbox to toggle its checked attr",
+            icon: "checklist",
+            makeDocument: { .taskList }
         ),
         Demo(
             id: "large",
@@ -269,6 +283,13 @@ private struct SimpleEditorToolbar: View {
 
                 Divider().frame(height: 24)
 
+                listMenu
+                toolButton("increase.indent", "Indent") { editor.view?.sinkListItem() }
+                toolButton("decrease.indent", "Outdent") { editor.view?.liftListItem() }
+                toolButton("checklist.checked", "Toggle task") { editor.view?.toggleTaskItemChecked() }
+
+                Divider().frame(height: 24)
+
                 align("left", "text.alignleft")
                 align("center", "text.aligncenter")
                 align("right", "text.alignright")
@@ -278,8 +299,12 @@ private struct SimpleEditorToolbar: View {
             .padding(.vertical, 8)
         }
         .background(.bar)
-        // Re-read active state whenever the editor reports a change.
-        .id(editor.revision)
+        // The toolbar observes `editor`, so a bumped `revision` already re-runs
+        // this body and re-reads the active-state tints. An `.id(revision)` here
+        // would also work, but it throws away the whole view tree (Menus and
+        // all) and rebuilds it from scratch on every keystroke and caret move —
+        // ~12× costlier per rebuild (see ToolbarRebuildBenchmark), the
+        // main-thread hostage that made typing choppy on the simulator.
     }
 
     private func markButton(_ mark: Mark, symbol: String, label: String) -> some View {
@@ -299,6 +324,26 @@ private struct SimpleEditorToolbar: View {
         }
         .buttonStyle(.bordered)
         .tint(.secondary)
+    }
+
+    private func toolButton(_ symbol: String, _ label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) { Image(systemName: symbol) }
+            .buttonStyle(.bordered)
+            .tint(.secondary)
+            .accessibilityLabel(label)
+    }
+
+    private var listMenu: some View {
+        Menu {
+            Button("Bullet List", systemImage: "list.bullet") { editor.view?.wrapInList("bulletList") }
+            Button("Ordered List", systemImage: "list.number") { editor.view?.wrapInList("orderedList") }
+            Button("Task List", systemImage: "checklist") { editor.view?.wrapInList("taskList") }
+        } label: {
+            Image(systemName: "list.bullet")
+                .frame(height: 30)
+                .padding(.horizontal, 8)
+                .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+        }
     }
 
     private var blockMenu: some View {
@@ -361,11 +406,71 @@ private struct SimpleEditorToolbar: View {
         view.onStateChange = { [weak self] in self?.revision &+= 1 }
     }
 
+    /// Drives the same `revision` bump a keystroke / caret move does, for the
+    /// in-process toolbar-rebuild benchmark.
+    func bumpRevisionForBenchmark() { revision &+= 1 }
+
     func isActive(_ mark: Mark) -> Bool {
         view?.isActive(mark) ?? false
     }
 
     var headingLevel: Int? { view?.activeHeadingLevel }
+}
+
+/// Measures how long the formatting toolbar takes to react to one editor-state
+/// change (the bump a keystroke or caret move triggers). Hosts the real
+/// `SimpleEditorToolbar` and drives it through synchronous render passes with
+/// `CATransaction.flush()`, so it measures SwiftUI's actual rebuild work rather
+/// than XCUITest's event-synthesis overhead. Guards the `.id(revision)` trap,
+/// which made every bump tear down and rebuild the whole toolbar tree.
+private struct ToolbarRebuildBenchmark: View {
+    @State private var result = "running…"
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Text("Toolbar Rebuild Benchmark").font(.headline)
+            Text(result)
+                .font(.system(.body, design: .monospaced))
+                .multilineTextAlignment(.center)
+                .accessibilityIdentifier("toolbar-rebuild-result")
+        }
+        .padding()
+        .task { result = await Self.run() }
+    }
+
+    @MainActor
+    static func run(iterations: Int = 400) async -> String {
+        let proxy = EditorProxy()
+        let editor = ProseView(document: .simpleEditor)
+        proxy.bind(editor)
+
+        let host = UIHostingController(rootView: SimpleEditorToolbar(editor: proxy))
+        host.view.frame = CGRect(x: 0, y: 0, width: 390, height: 52)
+        let window = UIApplication.shared.connectedScenes
+            .compactMap { ($0 as? UIWindowScene)?.keyWindow }
+            .first
+        window?.addSubview(host.view)
+        host.view.layoutIfNeeded()
+        CATransaction.flush()
+
+        func driveOneRebuild() {
+            proxy.bumpRevisionForBenchmark()
+            CATransaction.flush()
+        }
+
+        for _ in 0..<40 { driveOneRebuild() } // warm up CoreText / SwiftUI caches
+
+        let start = CACurrentMediaTime()
+        for _ in 0..<iterations { driveOneRebuild() }
+        let elapsed = CACurrentMediaTime() - start
+
+        host.view.removeFromSuperview()
+
+        let perRebuildMs = elapsed / Double(iterations) * 1000
+        let line = String(format: "%.4f ms/rebuild over %d", perRebuildMs, iterations)
+        print("[toolbar-benchmark] \(line)")
+        return line
+    }
 }
 
 private struct ProseEditorView: UIViewRepresentable {
@@ -544,6 +649,17 @@ extension Document {
             .listItem([.paragraph([.text("Third step, back at the outer level.")])]),
         ]),
         .paragraph([.text("Press Tab at an item's start to sink it; Shift-Tab lifts it back out.")]),
+    ]))
+
+    fileprivate static let taskList = Document(.doc([
+        .heading(level: 1, [.text("Task List")]),
+        .paragraph([.text("A task list holds checkable items. Tap a checkbox to toggle its checked state:")]),
+        .taskList([
+            .taskItem(checked: true, [.paragraph([.text("A finished task — checked.")])]),
+            .taskItem(checked: false, [.paragraph([.text("A task still to do.")])]),
+            .taskItem(checked: false, [.paragraph([.text("Another open task, a little longer so the checkbox stays aligned to the first line.")])]),
+        ]),
+        .paragraph([.text("The checked attr survives split, join, sink and lift just like any list item.")]),
     ]))
 
     fileprivate static let structure = Document(.doc([

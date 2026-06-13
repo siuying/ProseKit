@@ -1,6 +1,6 @@
 # 06 — Task lists
 
-Status: ready-for-agent
+Status: ready-for-human
 
 ## What to build
 
@@ -21,16 +21,16 @@ End-to-end behavior:
 
 ## Acceptance criteria
 
-- [ ] A Tiptap `taskList` loads, round-trips (incl. `checked`), and renders with
+- [x] A Tiptap `taskList` loads, round-trips (incl. `checked`), and renders with
       checkboxes
-- [ ] Tapping a checkbox toggles `checked` via a Command + block-attr Step;
+- [x] Tapping a checkbox toggles `checked` via a Command + block-attr Step;
       undo/redo restores it; Positions stay stable
-- [ ] Splitting a checked item yields a new item with the intended `checked`
+- [x] Splitting a checked item yields a new item with the intended `checked`
       state; join/sink/lift preserve `checked`
-- [ ] Enter/Backspace/Tab behave as for bullet items
-- [ ] Rendering-equivalence for toggle; iOS simulator screenshot confirms
+- [x] Enter/Backspace/Tab behave as for bullet items
+- [x] Rendering-equivalence for toggle; iOS simulator screenshot confirms
       checkbox states
-- [ ] Full package suite green
+- [x] Full package suite green
 
 ## Blocked by
 

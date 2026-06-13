@@ -1,6 +1,6 @@
 # 05 — Ordered list + nested-list indent/outdent
 
-Status: ready-for-agent
+Status: ready-for-human
 
 ## What to build
 
@@ -27,18 +27,21 @@ exercises the recursive index/layout/reuse paths at depth > 2.
 
 ## Acceptance criteria
 
-- [ ] A Tiptap `orderedList` (incl. non-1 `start`) loads, round-trips, and
+- [x] A Tiptap `orderedList` (incl. non-1 `start`) loads, round-trips, and
       renders with correct ordinals
-- [ ] Tab sinks an item into a nested list; Shift-Tab lifts it out; both invert
+- [x] Tab sinks an item into a nested list; Shift-Tab lifts it out; both invert
       and map Positions correctly
-- [ ] Ordinals recompute correctly after sink/lift and after item insert/delete
+- [x] Ordinals recompute correctly after sink/lift and after item insert/delete
       (derived from sibling index, never stored)
-- [ ] Nested lists (depth > 2) render with per-level indent and numbering; the
+- [x] Nested lists (depth > 2) render with per-level indent and numbering; the
       leaf-block index and layout reuse hold at that depth
-- [ ] Rendering-equivalence across sink / lift / renumber; iOS simulator
+- [x] Rendering-equivalence across sink / lift / renumber; iOS simulator
       screenshot confirms nested numbering
-- [ ] Keystroke perf on a deeply-nested fixture holds
-- [ ] Full package suite green
+- [ ] Keystroke perf on a deeply-nested fixture holds — **deferred** with the
+      incremental subtree-reuse work (#24): nested edits currently rebuild the
+      index + relayout fully. Correct, but not yet on the flat keystroke hot
+      path; no deeply-nested perf benchmark exists yet.
+- [x] Full package suite green
 
 ## Blocked by
 

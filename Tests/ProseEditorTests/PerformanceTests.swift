@@ -284,6 +284,16 @@ final class PerformanceTests: XCTestCase {
         measureTypingProse(TheLastQuestion.manyPages, exerciseInteractionPath: true)
     }
 
+    /// The full UIKit interaction path at Simple-Editor scale (one page). Pins
+    /// the per-keystroke cost of the work UIKit's keyboard machinery does around
+    /// every edit — the whole-document read, caret/selection geometry, caret
+    /// step, and a selection-chrome-dirtied layout pass — for a document the
+    /// size users actually focus, so a regression here surfaces as the typing
+    /// choppiness that the many-pages benchmark amortises across a huge tree.
+    func testInteractionPathTypingOnePageProse() {
+        measureTypingProse(TheLastQuestion.onePage, exerciseInteractionPath: true)
+    }
+
     func testTypingAtEndManyPagesUITextView() {
         measureTypingUITextView(TheLastQuestion.manyPages)
     }
