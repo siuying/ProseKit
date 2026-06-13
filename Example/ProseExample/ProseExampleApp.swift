@@ -82,6 +82,13 @@ private struct Demo: Identifiable, Hashable {
             makeDocument: { .structure }
         ),
         Demo(
+            id: "blockquote",
+            title: "Block Nesting",
+            subtitle: "A blockquote containing paragraphs — nested container layout with an indent rule",
+            icon: "text.quote",
+            makeDocument: { .nesting }
+        ),
+        Demo(
             id: "large",
             title: "Large Document",
             subtitle: "2,000 paragraphs: fling scrolling, keyboard avoidance, responsive typing",
@@ -469,6 +476,16 @@ extension Document {
             .paragraph([.text("Filler paragraph \(n). Keep dragging the selection handle toward the screen edge and watch the document scroll underneath it.")])
         }
     ))
+
+    fileprivate static let nesting = Document(.doc([
+        .heading(level: 1, [.text("Block Nesting")]),
+        .paragraph([.text("A blockquote is a container block: it holds other blocks and lays them out indented, with a rule down its left edge.")]),
+        .blockquote([
+            .paragraph([.text("This paragraph lives inside a blockquote.")]),
+            .paragraph([.text("So does this one — two quoted paragraphs, one container.")]),
+        ]),
+        .paragraph([.text("And this paragraph is back at the top level, below the quote.")]),
+    ]))
 
     fileprivate static let structure = Document(.doc([
         .heading(level: 1, [.text("Structural Editing")]),

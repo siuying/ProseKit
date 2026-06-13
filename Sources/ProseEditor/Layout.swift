@@ -52,6 +52,10 @@ public struct LayoutBox: Equatable, Sendable {
     public var lineFragments: [LineFragment]
     public var positionRange: Range<Position>
     public var typesetID: Int
+    /// The leaf boxes in document order, flattened across nesting. Set on the
+    /// **root** box only (empty elsewhere); the geometry mapper binary-searches
+    /// it. For a flat document this is exactly `children` (shared, no copy).
+    public var leaves: [LayoutBox]
 
     public init(
         kind: Kind,
@@ -60,7 +64,8 @@ public struct LayoutBox: Equatable, Sendable {
         children: [LayoutBox] = [],
         lineFragments: [LineFragment] = [],
         positionRange: Range<Position> = 0..<0,
-        typesetID: Int = 0
+        typesetID: Int = 0,
+        leaves: [LayoutBox] = []
     ) {
         self.kind = kind
         self.node = node
@@ -69,6 +74,7 @@ public struct LayoutBox: Equatable, Sendable {
         self.lineFragments = lineFragments
         self.positionRange = positionRange
         self.typesetID = typesetID
+        self.leaves = leaves
     }
 
     func moved(toY y: CGFloat, positionRange range: Range<Position>) -> LayoutBox {
@@ -130,6 +136,12 @@ public struct IncrementalLayoutStore: Sendable {
     /// equivalence tests pin that trust). Issue 07: the previous walk made
     /// every keystroke O(document).
     public mutating func layout(_ document: Document, changedRange: Range<Position>? = nil) throws -> LayoutBox {
+        // Nested documents take a fresh recursive layout (incremental subtree
+        // reuse is slice 02). The flat fast path below — the keystroke hot path —
+        // is unchanged.
+        if !document.root.content.allSatisfy(\.isTextblock) {
+            return try layoutNested(document)
+        }
         let oldChildren = previous?.children ?? []
         // A width change invalidates every cached typeset; reuse is only
         // sound against a previous layout at the same width.
@@ -176,11 +188,80 @@ public struct IncrementalLayoutStore: Sendable {
             node: document.root,
             frame: CGRect(x: 0, y: 0, width: width, height: children.last?.frame.maxY ?? 0),
             children: children,
-            positionRange: 0..<(document.endPosition + 1)
+            positionRange: 0..<(document.endPosition + 1),
+            leaves: children // flat: the children are the leaves (shared, no copy)
         )
         previous = root
         previousWidth = width
         return root
+    }
+
+    /// Fresh recursive layout for a nested document: container boxes stack their
+    /// children and reserve a left indent for decoration; leaf boxes typeset as
+    /// on the flat path. No Changed-Range reuse yet (slice 02). Leaf boxes carry
+    /// absolute frames, so the geometry mapper reads them unchanged.
+    private mutating func layoutNested(_ document: Document) throws -> LayoutBox {
+        try schema.validate(document)
+        var leaves: [LayoutBox] = []
+        var children: [LayoutBox] = []
+        var y: CGFloat = 0
+        var position: Position = 1
+        for child in document.root.content {
+            let box = layoutBlock(child, x: 0, y: y, width: width, position: position, into: &leaves)
+            y = box.frame.maxY + blockSpacing
+            position += child.nodeSize
+            children.append(box)
+        }
+        let root = LayoutBox(
+            kind: .container,
+            node: document.root,
+            frame: CGRect(x: 0, y: 0, width: width, height: children.last?.frame.maxY ?? 0),
+            children: children,
+            positionRange: 0..<(document.endPosition + 1),
+            leaves: leaves
+        )
+        previous = root
+        previousWidth = width
+        return root
+    }
+
+    /// Lays out one block at (`x`, `y`) spanning `width`, its node range starting
+    /// at `position`. Textblocks typeset; containers indent and stack children,
+    /// appending every leaf it reaches to `leaves` in document order.
+    private mutating func layoutBlock(
+        _ node: Node,
+        x: CGFloat,
+        y: CGFloat,
+        width: CGFloat,
+        position: Position,
+        into leaves: inout [LayoutBox]
+    ) -> LayoutBox {
+        let range = position..<(position + node.nodeSize)
+        if node.isTextblock {
+            let box = typesetLeafBlock(node, x: x, width: width, y: y, positionRange: range, typesetID: allocateTypesetID())
+            leaves.append(box)
+            return box
+        }
+        let indent = containerIndent(forType: node.type)
+        let childX = x + indent
+        let childWidth = max(1, width - indent)
+        var childBoxes: [LayoutBox] = []
+        var childY = y
+        var childPosition = position + 1 // past the container's opening token
+        for child in node.content {
+            let box = layoutBlock(child, x: childX, y: childY, width: childWidth, position: childPosition, into: &leaves)
+            childY = box.frame.maxY + blockSpacing
+            childPosition += child.nodeSize
+            childBoxes.append(box)
+        }
+        let height = (childBoxes.last?.frame.maxY ?? y) - y
+        return LayoutBox(
+            kind: .container,
+            node: node,
+            frame: CGRect(x: x, y: y, width: width, height: height),
+            children: childBoxes,
+            positionRange: range
+        )
     }
 
     private mutating func allocateTypesetID() -> Int {
@@ -206,6 +287,7 @@ private func alignedOriginX(_ alignment: String?, lineWidth: CGFloat, width: CGF
 
 private func typesetLeafBlock(
     _ block: Node,
+    x: CGFloat = 0,
     width: CGFloat,
     y: CGFloat,
     positionRange: Range<Position>,
@@ -220,11 +302,20 @@ private func typesetLeafBlock(
     return LayoutBox(
         kind: .leafBlock,
         node: block,
-        frame: CGRect(x: 0, y: y, width: width, height: fragments.last?.frame.maxY ?? 0),
+        frame: CGRect(x: x, y: y, width: width, height: fragments.last?.frame.maxY ?? 0),
         lineFragments: fragments,
         positionRange: positionRange,
         typesetID: typesetID
     )
+}
+
+/// The left inset a container indents its content by (and the band the Canvas
+/// paints its decoration into). Blockquote is the only container in slice 01.
+func containerIndent(forType type: String) -> CGFloat {
+    switch type {
+    case "blockquote": return 20
+    default: return 0
+    }
 }
 
 private func typesetLineFragments(

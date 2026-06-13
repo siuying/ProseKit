@@ -43,11 +43,44 @@ import UIKit
         context.scaleBy(x: 1, y: -1)
         context.setFillColor(UIColor.label.cgColor)
         for box in layoutBox.children {
-            // Blocks are y-ordered; everything past the dirty rect is clean.
+            // Boxes are y-ordered; everything past the dirty rect is clean.
             if box.frame.minY > contentRect.maxY { break }
-            guard box.frame.intersects(contentRect) else { continue }
-            draw(block: box, in: context, flippedAbout: flipHeight)
+            drawBox(box, in: context, contentRect: contentRect, flippedAbout: flipHeight)
         }
+        context.restoreGState()
+    }
+
+    /// Draws one box: a leaf typesets its line fragments; a container paints its
+    /// decoration (the blockquote rule) then recurses into its children. Boxes
+    /// outside the dirty region are skipped.
+    private func drawBox(_ box: LayoutBox, in context: CGContext, contentRect: CGRect, flippedAbout flipHeight: CGFloat) {
+        guard box.frame.intersects(contentRect) else { return }
+        switch box.kind {
+        case .leafBlock:
+            draw(block: box, in: context, flippedAbout: flipHeight)
+        case .container:
+            drawContainerDecoration(box, in: context, flippedAbout: flipHeight)
+            for child in box.children {
+                if child.frame.minY > contentRect.maxY { break }
+                drawBox(child, in: context, contentRect: contentRect, flippedAbout: flipHeight)
+            }
+        }
+    }
+
+    /// Container decorations drawn in content space (flipped about the layout
+    /// height like the glyphs). Slice 01: the blockquote's vertical rule down
+    /// its indent band.
+    private func drawContainerDecoration(_ box: LayoutBox, in context: CGContext, flippedAbout flipHeight: CGFloat) {
+        guard box.node.type == "blockquote" else { return }
+        let rule = CGRect(
+            x: box.frame.minX + 6,
+            y: flipHeight - box.frame.maxY,
+            width: 4,
+            height: box.frame.height
+        )
+        context.saveGState()
+        context.setFillColor(UIColor.systemGray3.cgColor)
+        context.fill(rule)
         context.restoreGState()
     }
 

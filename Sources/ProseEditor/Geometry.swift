@@ -34,7 +34,7 @@ public struct GeometryMapper: Sendable {
         let upper = max(selection.anchor, selection.head)
         guard lower < upper else { return [] }
 
-        let blocks = root.children
+        let blocks = root.leaves
         var rects: [CGRect] = []
         for blockIndex in firstBlockIndex(reaching: lower, in: blocks)..<blocks.count {
             let block = blocks[blockIndex]
@@ -58,7 +58,7 @@ public struct GeometryMapper: Sendable {
     }
 
     public func position(after position: Position, in root: LayoutBox) -> Position {
-        let blocks = root.children
+        let blocks = root.leaves
         guard let index = blockIndex(containing: position, in: blocks),
               isTextPosition(position, in: blocks[index]) else {
             return position
@@ -71,7 +71,7 @@ public struct GeometryMapper: Sendable {
     }
 
     public func position(before position: Position, in root: LayoutBox) -> Position {
-        let blocks = root.children
+        let blocks = root.leaves
         guard let index = blockIndex(containing: position, in: blocks),
               isTextPosition(position, in: blocks[index]) else {
             return position
@@ -84,7 +84,7 @@ public struct GeometryMapper: Sendable {
     }
 
     public func position(above position: Position, in root: LayoutBox) -> Position {
-        let blocks = root.children
+        let blocks = root.leaves
         guard let located = locateLineFragment(containing: position, in: blocks) else {
             return position
         }
@@ -97,7 +97,7 @@ public struct GeometryMapper: Sendable {
     }
 
     public func position(below position: Position, in root: LayoutBox) -> Position {
-        let blocks = root.children
+        let blocks = root.leaves
         guard let located = locateLineFragment(containing: position, in: blocks) else {
             return position
         }
@@ -205,7 +205,7 @@ public struct GeometryMapper: Sendable {
     }
 
     private func lineFragment(containing position: Position, in root: LayoutBox) -> AbsoluteLineFragment? {
-        let blocks = root.children
+        let blocks = root.leaves
         if let located = locateLineFragment(containing: position, in: blocks) {
             return located.absolute(in: blocks)
         }
@@ -216,7 +216,7 @@ public struct GeometryMapper: Sendable {
     }
 
     private func closestLineFragment(to point: CGPoint, in root: LayoutBox) -> AbsoluteLineFragment? {
-        let blocks = root.children
+        let blocks = root.leaves
         guard let nearest = blockIndex(nearestToY: point.y, in: blocks) else { return nil }
         // Fragment midYs increase monotonically through the document, so the
         // closest one lives in the nearest block or an adjacent one.
