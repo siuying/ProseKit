@@ -335,6 +335,13 @@ public struct Document: Codable, Hashable, Sendable {
         return root.textNode(atPath: range.path)?.marks.contains(mark) == true
     }
 
+    /// The Marks carried by the text run spanning `from..<to`, or an empty
+    /// list when the range crosses a run boundary.
+    public func marks(from: Position, to: Position) -> [Mark] {
+        guard let range = textRange(from: from, to: to) else { return [] }
+        return root.textNode(atPath: range.path)?.marks ?? []
+    }
+
     /// Locates the text node containing `from...to`: binary search for the
     /// block, then a scan of that block's text runs. Blocks are flat in
     /// slice 1 (paragraph/heading of text runs), so a whole-tree walk here
@@ -387,4 +394,3 @@ public struct BlockInfo: Equatable, Sendable {
         self.path = path
     }
 }
-
