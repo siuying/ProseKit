@@ -26,22 +26,29 @@ private func replacingText(in document: Document, from: Position, to: Position, 
         // The range crosses a run or block boundary; merge across it.
         return try replacingAcrossRuns(in: document, from: from, to: to, with: insertedText, marks: marks)
     }
-    let blockIndex = range.path[0]
-    if !marks.isEmpty, from == to, range.path.count == 2 {
+    let newRoot: Node
+    if !marks.isEmpty, from == to {
+        // Marked insertion at a caret: splice a run carrying the typing Marks.
         let offset = range.text.distance(from: range.text.startIndex, to: range.range.lowerBound)
-        let newRoot = document.root.splicingTextNode(
+        newRoot = document.root.splicingTextNode(
             atPath: range.path,
             replacing: offset..<offset,
             withText: insertedText,
             marks: marks
         )
+    } else {
+        var updated = range.text
+        updated.replaceSubrange(range.range, with: insertedText)
+        newRoot = document.root.replacingTextNode(atPath: range.path, with: updated)
+    }
+    // Flat (path = [block, run]): incremental single-block replace, the keystroke
+    // fast path. Nested (deeper path): rebuild the leaf tiling — incremental
+    // subtree derivation is a follow-up (.scratch/block-nesting/issues/02).
+    if range.path.count == 2 {
+        let blockIndex = range.path[0]
         return document.replacingBlocks(in: blockIndex..<(blockIndex + 1), with: [newRoot.content[blockIndex]])
     }
-    var updated = range.text
-    updated.replaceSubrange(range.range, with: insertedText)
-    let newRoot = document.root.replacingTextNode(atPath: range.path, with: updated)
-    guard range.path.count == 2 else { return Document(newRoot) }
-    return document.replacingBlocks(in: blockIndex..<(blockIndex + 1), with: [newRoot.content[blockIndex]])
+    return Document(newRoot)
 }
 
 /// Replacement whose range crosses a text-run or block boundary: the blocks at
@@ -50,6 +57,13 @@ private func replacingText(in document: Document, from: Position, to: Position, 
 /// block start becomes when the keyboard deletes the boundary "\n" in character
 /// space, and what typing over a selection spanning blocks does.
 private func replacingAcrossRuns(in document: Document, from: Position, to: Position, with insertedText: String, marks: [Mark]) throws -> Document {
+    // Cross-boundary merge addresses sibling leaves by their top-level index;
+    // inside a container that index is wrong. Nested cross-boundary replace
+    // (and the structural joins it implements) is slice 03 — a designed no-op
+    // until then, never silent corruption.
+    guard document.isFlat else {
+        throw StepError.unsupportedReplacement("cross-boundary replace in nested content is not supported yet")
+    }
     guard from <= to,
           let fromInfo = document.blockInfo(containing: from),
           let toInfo = document.blockInfo(containing: to),
