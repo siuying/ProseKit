@@ -45,6 +45,38 @@ final class EditorStateTests: XCTestCase {
         XCTAssertEqual(inHeading.activeHeadingLevel, 3)
     }
 
+    func testActiveListTypeAndListCommandAvailability() {
+        let document = Document(.doc([
+            .paragraph([.text("p")]),
+            .bulletList([
+                .listItem([.paragraph([.text("one")])]),
+                .listItem([.paragraph([.text("two")])]),
+            ]),
+            .taskList([.taskItem(checked: false, [.paragraph([.text("todo")])])]),
+        ]))
+
+        let paragraph = EditorState(document: document, selection: TextSelection(anchor: 2, head: 2))
+        XCTAssertNil(paragraph.activeListType)
+        XCTAssertFalse(paragraph.canSinkListItem)
+        XCTAssertFalse(paragraph.canLiftListItem)
+        XCTAssertFalse(paragraph.canToggleTaskItemChecked)
+
+        let firstListItem = EditorState(document: document, selection: TextSelection(anchor: 7, head: 7))
+        XCTAssertEqual(firstListItem.activeListType, "bulletList")
+        XCTAssertFalse(firstListItem.canSinkListItem)
+        XCTAssertTrue(firstListItem.canLiftListItem)
+        XCTAssertFalse(firstListItem.canToggleTaskItemChecked)
+
+        let secondListItem = EditorState(document: document, selection: TextSelection(anchor: 14, head: 14))
+        XCTAssertEqual(secondListItem.activeListType, "bulletList")
+        XCTAssertTrue(secondListItem.canSinkListItem)
+        XCTAssertTrue(secondListItem.canLiftListItem)
+
+        let taskItem = EditorState(document: document, selection: TextSelection(anchor: 23, head: 23))
+        XCTAssertEqual(taskItem.activeListType, "taskList")
+        XCTAssertTrue(taskItem.canToggleTaskItemChecked)
+    }
+
     func testInsertAndDeleteDispatchLocalTransactions() throws {
         var state = EditorState(document: Document(.doc([
             .paragraph([.text("hi")]),

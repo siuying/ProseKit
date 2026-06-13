@@ -286,13 +286,17 @@ private struct SimpleEditorToolbar: View {
                     Image(systemName: "link")
                 }
                 .buttonStyle(.bordered)
+                .disabled(!editor.canSetLink)
+                .tint(editor.canSetLink ? .secondary : .gray)
 
                 Divider().frame(height: 24)
 
                 listMenu
-                toolButton("increase.indent", "Indent") { editor.view?.sinkListItem() }
-                toolButton("decrease.indent", "Outdent") { editor.view?.liftListItem() }
-                toolButton("checklist.checked", "Toggle task") { editor.view?.toggleTaskItemChecked() }
+                toolButton("increase.indent", "Indent", isEnabled: editor.canSinkListItem) { editor.view?.sinkListItem() }
+                toolButton("decrease.indent", "Outdent", isEnabled: editor.canLiftListItem) { editor.view?.liftListItem() }
+                toolButton("checklist.checked", "Toggle task", isEnabled: editor.canToggleTaskItemChecked) {
+                    editor.view?.toggleTaskItemChecked()
+                }
 
                 Divider().frame(height: 24)
 
@@ -332,10 +336,11 @@ private struct SimpleEditorToolbar: View {
         .tint(.secondary)
     }
 
-    private func toolButton(_ symbol: String, _ label: String, action: @escaping () -> Void) -> some View {
+    private func toolButton(_ symbol: String, _ label: String, isEnabled: Bool = true, action: @escaping () -> Void) -> some View {
         Button(action: action) { Image(systemName: symbol) }
             .buttonStyle(.bordered)
-            .tint(.secondary)
+            .tint(isEnabled ? .secondary : .gray)
+            .disabled(!isEnabled)
             .accessibilityLabel(label)
     }
 
@@ -345,10 +350,7 @@ private struct SimpleEditorToolbar: View {
             Button("Ordered List", systemImage: "list.number") { editor.view?.wrapInList("orderedList") }
             Button("Task List", systemImage: "checklist") { editor.view?.wrapInList("taskList") }
         } label: {
-            Image(systemName: "list.bullet")
-                .frame(height: 30)
-                .padding(.horizontal, 8)
-                .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+            menuIcon(listSymbol, isActive: editor.activeListType != nil)
         }
     }
 
@@ -361,7 +363,7 @@ private struct SimpleEditorToolbar: View {
         } label: {
             HStack(spacing: 4) {
                 Text(blockLabel).font(.subheadline.weight(.medium))
-                Image(systemName: "chevron.down").font(.caption2)
+                Image(systemName: "chevron.down").font(.caption2.weight(.semibold))
             }
             .padding(.horizontal, 8)
             .frame(height: 30)
@@ -374,6 +376,7 @@ private struct SimpleEditorToolbar: View {
             Button("Remove Highlight", systemImage: "xmark.circle") {
                 editor.view?.removeMark(type: "highlight")
             }
+            .disabled(!editor.hasHighlight)
             Divider()
             ForEach(swatches, id: \.hex) { swatch in
                 Button {
@@ -388,16 +391,32 @@ private struct SimpleEditorToolbar: View {
                 }
             }
         } label: {
-            Image(systemName: "highlighter")
-                .frame(height: 30)
-                .padding(.horizontal, 8)
-                .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+            menuIcon("highlighter", isActive: editor.hasHighlight)
         }
     }
 
     private var blockLabel: String {
         if let level = editor.headingLevel { return "H\(level)" }
         return "Paragraph"
+    }
+
+    private var listSymbol: String {
+        switch editor.activeListType {
+        case "orderedList": return "list.number"
+        case "taskList": return "checklist"
+        default: return "list.bullet"
+        }
+    }
+
+    private func menuIcon(_ symbol: String, isActive: Bool = false) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: symbol)
+            Image(systemName: "chevron.down").font(.caption2.weight(.semibold))
+        }
+        .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
+        .frame(height: 30)
+        .padding(.horizontal, 8)
+        .background(isActive ? Color.accentColor.opacity(0.12) : Color(.quaternarySystemFill), in: RoundedRectangle(cornerRadius: 6))
     }
 
     private func color(for hex: String) -> Color {
@@ -445,6 +464,12 @@ private struct SimpleEditorToolbar: View {
     }
 
     var headingLevel: Int? { view?.activeHeadingLevel }
+    var activeListType: String? { view?.activeListType }
+    var canSinkListItem: Bool { view?.canSinkListItem ?? false }
+    var canLiftListItem: Bool { view?.canLiftListItem ?? false }
+    var canToggleTaskItemChecked: Bool { view?.canToggleTaskItemChecked ?? false }
+    var canSetLink: Bool { view?.canSetLink ?? false }
+    var hasHighlight: Bool { view?.hasHighlight ?? false }
 }
 
 /// Measures how long the formatting toolbar takes to react to one editor-state

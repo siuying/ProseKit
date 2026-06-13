@@ -406,6 +406,12 @@ import UIKit
     public func isActive(_ mark: Mark) -> Bool { state.isActive(mark) }
     public var activeBlockType: String { state.activeBlockType }
     public var activeHeadingLevel: Int? { state.activeHeadingLevel }
+    public var activeListType: String? { state.activeListType }
+    public var canSinkListItem: Bool { state.canSinkListItem }
+    public var canLiftListItem: Bool { state.canLiftListItem }
+    public var canToggleTaskItemChecked: Bool { state.canToggleTaskItemChecked }
+    public var canSetLink: Bool { state.canSetLink }
+    public var hasHighlight: Bool { state.hasHighlight }
 
     @objc private func taskCheckboxTapped(_ gesture: UITapGestureRecognizer) {
         guard gesture.state == .ended else { return }

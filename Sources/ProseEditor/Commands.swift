@@ -28,6 +28,58 @@ public enum Commands {
         itemType == self.itemType(forListType: listType)
     }
 
+    private struct ListContext {
+        var info: BlockInfo
+        var list: Node
+        var item: Node
+        var listPath: [Int]
+        var itemPath: [Int]
+        var itemIndex: Int
+        var firstBlockTextStart: Position
+    }
+
+    private static func listContext(in state: EditorState) -> ListContext? {
+        guard let info = state.document.blockInfo(containing: state.selection.head),
+              info.path.count >= 3 else {
+            return nil
+        }
+        let itemPath = Array(info.path.dropLast())
+        let listPath = Array(itemPath.dropLast())
+        let item = state.document.node(atPath: itemPath)
+        let list = state.document.node(atPath: listPath)
+        guard isListType(list.type),
+              listType(list.type, acceptsItemType: item.type),
+              let firstBlockStart = state.document.position(ofNodeAtPath: itemPath + [0]) else {
+            return nil
+        }
+        return ListContext(
+            info: info,
+            list: list,
+            item: item,
+            listPath: listPath,
+            itemPath: itemPath,
+            itemIndex: itemPath.last ?? 0,
+            firstBlockTextStart: firstBlockStart + 1
+        )
+    }
+
+    public static func activeListType(in state: EditorState) -> String? {
+        listContext(in: state)?.list.type
+    }
+
+    public static func canSinkListItem(in state: EditorState) -> Bool {
+        guard let context = listContext(in: state) else { return false }
+        return context.itemIndex > 0
+    }
+
+    public static func canLiftListItem(in state: EditorState) -> Bool {
+        listContext(in: state) != nil
+    }
+
+    public static func canToggleTaskItemChecked(in state: EditorState) -> Bool {
+        listContext(in: state)?.item.type == "taskItem"
+    }
+
     public static func splitBlock() -> Command {
         Command { state in
             guard state.selection.isCollapsed else { return false }
@@ -132,19 +184,11 @@ public enum Commands {
     public static func sinkListItem() -> Command {
         Command { state in
             guard state.selection.isCollapsed,
-                  let info = state.document.blockInfo(containing: state.selection.head),
-                  state.selection.head == info.start + 1,
-                  info.path.count >= 3 else {
+                  let context = listContext(in: state),
+                  context.itemIndex > 0 else {
                 return false
             }
-            let itemPath = Array(info.path.dropLast())
-            let listPath = Array(itemPath.dropLast())
-            let item = state.document.node(atPath: itemPath)
-            let list = state.document.node(atPath: listPath)
-            guard isListType(list.type), listType(list.type, acceptsItemType: item.type), (itemPath.last ?? 0) > 0 else {
-                return false
-            }
-            let step = SinkListItemStep(at: state.selection.head)
+            let step = SinkListItemStep(at: context.firstBlockTextStart)
             let caret = step.map(state.selection.head)
             try state.dispatch(Transaction(
                 steps: [step],
@@ -158,21 +202,14 @@ public enum Commands {
     public static func liftListItem() -> Command {
         Command { state in
             guard state.selection.isCollapsed,
-                  let info = state.document.blockInfo(containing: state.selection.head),
-                  state.selection.head == info.start + 1,
-                  info.path.count >= 3 else {
+                  let context = listContext(in: state) else {
                 return false
             }
-            let itemPath = Array(info.path.dropLast())
-            let listPath = Array(itemPath.dropLast())
-            let item = state.document.node(atPath: itemPath)
-            let list = state.document.node(atPath: listPath)
-            guard isListType(list.type), listType(list.type, acceptsItemType: item.type) else { return false }
             let step: any Step
-            if info.path.count >= 5 {
-                step = LiftNestedListItemStep(at: state.selection.head)
+            if context.info.path.count >= 5 {
+                step = LiftNestedListItemStep(at: context.firstBlockTextStart)
             } else {
-                step = LiftListItemStep(at: state.selection.head)
+                step = LiftListItemStep(at: context.firstBlockTextStart)
             }
             let caret = step.map(state.selection.head)
             try state.dispatch(Transaction(
@@ -202,19 +239,32 @@ public enum Commands {
         }
     }
 
-    /// Wraps the top-level textblock at the caret in a one-item list of
-    /// `listType` (`bulletList`/`orderedList`/`taskList`) — the headless side of
-    /// the list toolbar buttons and of the `- ` / `1. ` input rules. No-ops when
-    /// the caret is not in a top-level textblock (wrapping a block already inside
-    /// a list would nest it, which Tab handles instead).
+    /// Toggles the current block into `listType`, out of it when it already
+    /// matches, or changes the containing list to `listType`.
     public static func wrapInList(_ listType: String) -> Command {
         Command { state in
-            guard isListType(listType),
-                  let info = state.document.blockInfo(containing: state.selection.head),
-                  info.node.isTextblock,
-                  info.path.count == 1 else {
+            guard isListType(listType) else {
                 return false
             }
+            if let context = listContext(in: state) {
+                let step: any Step = context.list.type == listType
+                    ? LiftListItemStep(at: context.firstBlockTextStart)
+                    : ChangeListTypeStep(
+                        at: state.selection.head,
+                        listType: listType,
+                        listAttrs: listType == "orderedList" ? ["start": .int(1)] : [:]
+                    )
+                try state.dispatch(Transaction(
+                    steps: [step],
+                    selection: TextSelection(anchor: step.map(state.selection.anchor), head: step.map(state.selection.head)),
+                    origin: .local
+                ))
+                return true
+            }
+
+            guard let info = state.document.blockInfo(containing: state.selection.head),
+                  info.node.isTextblock,
+                  info.path.count == 1 else { return false }
             let step = WrapInListStep(
                 blockRange: info.start..<(info.start + info.node.nodeSize),
                 listType: listType,
@@ -259,14 +309,10 @@ public enum Commands {
 
     public static func toggleTaskItemChecked() -> Command {
         Command { state in
-            guard let info = state.document.blockInfo(containing: state.selection.head),
-                  info.path.count >= 3 else {
-                return false
-            }
-            let item = state.document.node(atPath: Array(info.path.dropLast()))
-            guard item.type == "taskItem" else { return false }
-            let next = !(item.attrs["checked"]?.boolValue ?? false)
-            try dispatchCollapsing(SetTaskItemCheckedStep(at: state.selection.head, checked: next), in: &state)
+            guard let context = listContext(in: state),
+                  context.item.type == "taskItem" else { return false }
+            let next = !(context.item.attrs["checked"]?.boolValue ?? false)
+            try dispatchCollapsing(SetTaskItemCheckedStep(at: context.firstBlockTextStart, checked: next), in: &state)
             return true
         }
     }

@@ -93,6 +93,33 @@ public struct EditorState: Sendable {
         return node?.attrs["level"]?.intValue
     }
 
+    public var activeListType: String? {
+        Commands.activeListType(in: self)
+    }
+
+    public var canSinkListItem: Bool {
+        Commands.canSinkListItem(in: self)
+    }
+
+    public var canLiftListItem: Bool {
+        Commands.canLiftListItem(in: self)
+    }
+
+    public var canToggleTaskItemChecked: Bool {
+        Commands.canToggleTaskItemChecked(in: self)
+    }
+
+    public var canSetLink: Bool {
+        !selection.isCollapsed
+    }
+
+    public var hasHighlight: Bool {
+        let lower = min(selection.anchor, selection.head)
+        let upper = max(selection.anchor, selection.head)
+        guard lower < upper else { return false }
+        return document.marks(from: lower, to: upper).contains { $0.type == "highlight" }
+    }
+
     public mutating func toggleTypingMark(_ mark: Mark) {
         if typingMarks.contains(mark) {
             typingMarks.removeAll { $0 == mark }
