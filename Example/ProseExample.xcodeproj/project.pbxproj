@@ -10,6 +10,7 @@
 		5358E7F34E16CD8E88BD7310 /* ProseExampleApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CCF4BD973670EB486A21AAF /* ProseExampleApp.swift */; };
 		6F7931DA33860F5359A9EED2 /* ProseEditor in Frameworks */ = {isa = PBXBuildFile; productRef = E61C99D8FB88D01B63A57C0B /* ProseEditor */; };
 		88F75EDAB76366A993D45FDE /* ProseExampleUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B668E9FB9C855656B1D7AC16 /* ProseExampleUITests.swift */; };
+		DDAD2898A3D8EC3BF525A54D /* TiptapEditor.html in Resources */ = {isa = PBXBuildFile; fileRef = 5CD2511A527C145D1AF0D63F /* TiptapEditor.html */; };
 		EADE793B09D32316AE79A06D /* ProseModel in Frameworks */ = {isa = PBXBuildFile; productRef = F83BF875FF8859E43B2B722E /* ProseModel */; };
 /* End PBXBuildFile section */
 
@@ -26,7 +27,8 @@
 /* Begin PBXFileReference section */
 		1332CD579DB040A6735550AF /* text-research */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "text-research"; path = ..; sourceTree = SOURCE_ROOT; };
 		4CCF4BD973670EB486A21AAF /* ProseExampleApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProseExampleApp.swift; sourceTree = "<group>"; };
-		869BE84C9F4F16A5CFB1404A /* ProseExample.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ProseExample.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		5CD2511A527C145D1AF0D63F /* TiptapEditor.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = TiptapEditor.html; sourceTree = "<group>"; };
+		869BE84C9F4F16A5CFB1404A /* ProseExample.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ProseExample.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		8E520E5AB516E3D62E310AB1 /* ProseExampleUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = ProseExampleUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B668E9FB9C855656B1D7AC16 /* ProseExampleUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProseExampleUITests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -57,6 +59,7 @@
 			isa = PBXGroup;
 			children = (
 				4CCF4BD973670EB486A21AAF /* ProseExampleApp.swift */,
+				5CD2511A527C145D1AF0D63F /* TiptapEditor.html */,
 			);
 			path = ProseExample;
 			sourceTree = "<group>";
@@ -113,6 +116,7 @@
 			buildConfigurationList = 2BCC1216BEC2F120BFC76167 /* Build configuration list for PBXNativeTarget "ProseExample" */;
 			buildPhases = (
 				EC6B1227AAC901F966D32493 /* Sources */,
+				EE8B814F539B9518E39A2201 /* Resources */,
 				E106E28ECC9222DE4325D3CF /* Frameworks */,
 			);
 			buildRules = (
@@ -165,6 +169,17 @@
 		};
 /* End PBXProject section */
 
+/* Begin PBXResourcesBuildPhase section */
+		EE8B814F539B9518E39A2201 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DDAD2898A3D8EC3BF525A54D /* TiptapEditor.html in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		976CF0B03DD6D6339AD81C08 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -198,7 +213,6 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				DEVELOPMENT_TEAM = C34CFF5CSV;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -372,7 +386,6 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				DEVELOPMENT_TEAM = C34CFF5CSV;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;

@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>Tiptap Reference Editor</title>
+  <style>
+    :root { font: -apple-system-body; }
+    * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      display: flex;
+      flex-direction: column;
+      font-family: -apple-system, system-ui, sans-serif;
+      color: #000;
+      background: #fff;
+    }
+    @media (prefers-color-scheme: dark) {
+      body { color: #fff; background: #000; }
+    }
+
+    /* Compact reference toolbar pinned to the bottom, mirroring the native
+       formatting bar under our editor in the right pane. */
+    #toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      padding: 8px;
+      border-top: 1px solid rgba(128,128,128,0.3);
+      background: rgba(128,128,128,0.08);
+    }
+    #toolbar button {
+      font: inherit;
+      font-size: 13px;
+      min-width: 30px;
+      padding: 4px 7px;
+      border: 1px solid rgba(128,128,128,0.4);
+      border-radius: 6px;
+      background: transparent;
+      color: inherit;
+    }
+    #toolbar button.on { background: #0a84ff; color: #fff; border-color: #0a84ff; }
+
+    #status {
+      padding: 4px 8px;
+      font-size: 11px;
+      color: #888;
+      text-align: center;
+    }
+
+    #editor { flex: 1; overflow-y: auto; min-height: 0; }
+    .ProseMirror {
+      padding: 12px 16px 24px;
+      outline: none;
+      font-size: 17px;
+      line-height: 1.4;
+    }
+    .ProseMirror:focus { outline: none; }
+    .ProseMirror h1 { font-size: 28px; font-weight: 700; margin: 0.5em 0 0.3em; }
+    .ProseMirror h2 { font-size: 23px; font-weight: 700; margin: 0.5em 0 0.3em; }
+    .ProseMirror h3 { font-size: 20px; font-weight: 600; margin: 0.5em 0 0.3em; }
+    .ProseMirror h4 { font-size: 18px; font-weight: 600; margin: 0.5em 0 0.3em; }
+    .ProseMirror h5 { font-size: 16px; font-weight: 600; margin: 0.5em 0 0.3em; }
+    .ProseMirror h6 { font-size: 14px; font-weight: 600; margin: 0.5em 0 0.3em; }
+    .ProseMirror p { margin: 0.4em 0; }
+    .ProseMirror code {
+      font-family: ui-monospace, Menlo, monospace;
+      font-size: 0.9em;
+      background: rgba(128,128,128,0.18);
+      padding: 0.1em 0.3em;
+      border-radius: 4px;
+    }
+    .ProseMirror blockquote {
+      border-left: 3px solid rgba(128,128,128,0.5);
+      margin: 0.4em 0;
+      padding-left: 12px;
+      color: inherit;
+    }
+    .ProseMirror a { color: #0a84ff; }
+    .ProseMirror mark { border-radius: 2px; padding: 0 1px; }
+    .ProseMirror ul, .ProseMirror ol { padding-left: 1.4em; margin: 0.4em 0; }
+    .ProseMirror ul[data-type="taskList"] { list-style: none; padding-left: 0.4em; }
+    .ProseMirror ul[data-type="taskList"] li { display: flex; align-items: flex-start; gap: 6px; }
+    .ProseMirror ul[data-type="taskList"] li > label { margin-top: 4px; }
+    .ProseMirror ul[data-type="taskList"] li > div { flex: 1; }
+  </style>
+</head>
+<body>
+  <div id="editor"></div>
+  <div id="status">loading tiptap…</div>
+  <div id="toolbar"></div>
+
+  <script type="module">
+    // The left pane is a genuine Tiptap / ProseMirror editor configured to
+    // mirror our Schema exactly, so a ProseMirror-JSON document round-trips
+    // through it identically to our editor — the basis for parity testing.
+    // Loaded from a CDN as ES modules; all packages share one major version so
+    // esm.sh dedupes the single @tiptap/pm (ProseMirror) instance they need.
+    const V = '2';
+    const [
+      { Editor },
+      { default: StarterKit },
+      { default: Underline },
+      { Highlight },
+      { default: Link },
+      { default: Subscript },
+      { default: Superscript },
+      { default: TextAlign },
+      { TaskList },
+      { TaskItem },
+    ] = await Promise.all([
+      import(`https://esm.sh/@tiptap/core@${V}`),
+      import(`https://esm.sh/@tiptap/starter-kit@${V}`),
+      import(`https://esm.sh/@tiptap/extension-underline@${V}`),
+      import(`https://esm.sh/@tiptap/extension-highlight@${V}`),
+      import(`https://esm.sh/@tiptap/extension-link@${V}`),
+      import(`https://esm.sh/@tiptap/extension-subscript@${V}`),
+      import(`https://esm.sh/@tiptap/extension-superscript@${V}`),
+      import(`https://esm.sh/@tiptap/extension-text-align@${V}`),
+      import(`https://esm.sh/@tiptap/extension-task-list@${V}`),
+      import(`https://esm.sh/@tiptap/extension-task-item@${V}`),
+    ]);
+
+    const editor = new Editor({
+      element: document.querySelector('#editor'),
+      extensions: [
+        StarterKit.configure({
+          // Our Schema has no code block or horizontal rule — drop them so the
+          // reference editor can only produce documents ours can represent.
+          codeBlock: false,
+          horizontalRule: false,
+          heading: { levels: [1, 2, 3, 4, 5, 6] },
+        }),
+        Underline,
+        Highlight.configure({ multicolor: true }),
+        Link.configure({ openOnClick: false }),
+        Subscript,
+        Superscript,
+        TextAlign.configure({ types: ['heading', 'paragraph'] }),
+        TaskList,
+        TaskItem.configure({ nested: true }),
+      ],
+      content: { type: 'doc', content: [{ type: 'paragraph' }] },
+      onSelectionUpdate: refreshToolbar,
+      onTransaction: refreshToolbar,
+    });
+
+    window.editor = editor;
+
+    // --- Swift bridge -------------------------------------------------------
+    // Replace the whole document from a ProseMirror-JSON object. The object is
+    // injected straight into the call (JSON is valid JS), so no string escaping.
+    window.setDocObject = (obj) => {
+      editor.commands.setContent(obj, false);
+    };
+    // Return the current document as a ProseMirror-JSON string for Swift.
+    window.getDoc = () => JSON.stringify(editor.getJSON());
+
+    // --- Reference toolbar --------------------------------------------------
+    const buttons = [
+      { label: 'H1', run: () => editor.chain().focus().toggleHeading({ level: 1 }).run(), active: () => editor.isActive('heading', { level: 1 }) },
+      { label: 'H2', run: () => editor.chain().focus().toggleHeading({ level: 2 }).run(), active: () => editor.isActive('heading', { level: 2 }) },
+      { label: 'H3', run: () => editor.chain().focus().toggleHeading({ level: 3 }).run(), active: () => editor.isActive('heading', { level: 3 }) },
+      { label: 'B', run: () => editor.chain().focus().toggleBold().run(), active: () => editor.isActive('bold') },
+      { label: 'I', run: () => editor.chain().focus().toggleItalic().run(), active: () => editor.isActive('italic') },
+      { label: 'U', run: () => editor.chain().focus().toggleUnderline().run(), active: () => editor.isActive('underline') },
+      { label: 'S', run: () => editor.chain().focus().toggleStrike().run(), active: () => editor.isActive('strike') },
+      { label: '</>', run: () => editor.chain().focus().toggleCode().run(), active: () => editor.isActive('code') },
+      { label: 'x²', run: () => editor.chain().focus().toggleSuperscript().run(), active: () => editor.isActive('superscript') },
+      { label: 'x₂', run: () => editor.chain().focus().toggleSubscript().run(), active: () => editor.isActive('subscript') },
+      { label: 'HL', run: () => editor.chain().focus().toggleHighlight({ color: '#ffd54f' }).run(), active: () => editor.isActive('highlight') },
+      { label: '🔗', run: () => editor.chain().focus().toggleLink({ href: 'https://example.com' }).run(), active: () => editor.isActive('link') },
+      { label: '•', run: () => editor.chain().focus().toggleBulletList().run(), active: () => editor.isActive('bulletList') },
+      { label: '1.', run: () => editor.chain().focus().toggleOrderedList().run(), active: () => editor.isActive('orderedList') },
+      { label: '☑', run: () => editor.chain().focus().toggleTaskList().run(), active: () => editor.isActive('taskList') },
+      { label: '❝', run: () => editor.chain().focus().toggleBlockquote().run(), active: () => editor.isActive('blockquote') },
+      { label: '⇤', run: () => editor.chain().focus().setTextAlign('left').run(), active: () => editor.isActive({ textAlign: 'left' }) },
+      { label: '↔', run: () => editor.chain().focus().setTextAlign('center').run(), active: () => editor.isActive({ textAlign: 'center' }) },
+      { label: '⇥', run: () => editor.chain().focus().setTextAlign('right').run(), active: () => editor.isActive({ textAlign: 'right' }) },
+      { label: '☰', run: () => editor.chain().focus().setTextAlign('justify').run(), active: () => editor.isActive({ textAlign: 'justify' }) },
+    ];
+
+    const toolbarEl = document.querySelector('#toolbar');
+    const buttonEls = buttons.map((b) => {
+      const el = document.createElement('button');
+      el.textContent = b.label;
+      el.addEventListener('click', (e) => { e.preventDefault(); b.run(); });
+      toolbarEl.appendChild(el);
+      return el;
+    });
+
+    function refreshToolbar() {
+      buttons.forEach((b, i) => buttonEls[i].classList.toggle('on', !!b.active()));
+    }
+    refreshToolbar();
+
+    document.querySelector('#status').textContent = 'tiptap ready — edit here or use the bridge';
+
+    // Tell Swift the editor is live so it can push the initial document.
+    window.webkit?.messageHandlers?.ready?.postMessage(true);
+  </script>
+</body>
+</html>

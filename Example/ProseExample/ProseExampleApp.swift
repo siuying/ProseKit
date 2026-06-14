@@ -2,6 +2,7 @@ import ProseEditor
 import ProseModel
 import SwiftUI
 import UIKit
+import WebKit
 
 @main
 struct ProseExampleApp: App {
@@ -34,6 +35,8 @@ struct ProseExampleApp: App {
                 NavigationStack {
                     if demo.id == "simple" {
                         SimpleEditorScreen(demo: demo)
+                    } else if demo.id == "parity" {
+                        ParityScreen(demo: demo)
                     } else {
                         DemoEditorScreen(demo: demo)
                     }
@@ -84,6 +87,13 @@ private struct Demo: Identifiable, Hashable {
             subtitle: "Tiptap-parity formatting bar: headings, every inline mark, highlight, links, and alignment",
             icon: "textformat",
             makeDocument: { .simpleEditor }
+        ),
+        Demo(
+            id: "parity",
+            title: "Tiptap Parity",
+            subtitle: "Side-by-side with a real Tiptap editor; send documents either way to check round-trip fidelity",
+            icon: "rectangle.split.2x1",
+            makeDocument: { .parityShowcase }
         ),
         Demo(
             id: "basics",
@@ -177,6 +187,8 @@ private struct DemoListView: View {
             .navigationDestination(for: Demo.self) { demo in
                 if demo.id == "simple" {
                     SimpleEditorScreen(demo: demo)
+                } else if demo.id == "parity" {
+                    ParityScreen(demo: demo)
                 } else {
                     DemoEditorScreen(demo: demo)
                 }
@@ -578,6 +590,205 @@ private struct ToolbarRebuildBenchmark: View {
     }
 }
 
+// MARK: - Tiptap Parity (split-screen comparison)
+
+/// Splits the screen between a real Tiptap editor (left) and our editor (right)
+/// so the two can be compared on the same document. The action bar bridges a
+/// ProseMirror-JSON document either way, or resets/clears both at once — the
+/// truth test for whether our editor reads and writes the model the same way
+/// the reference implementation does.
+private struct ParityScreen: View {
+    let demo: Demo
+    @StateObject private var controller = ParityController()
+    @StateObject private var editor = EditorProxy()
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ParityActionBar(controller: controller)
+            Divider()
+            HStack(spacing: 0) {
+                pane("Tiptap (reference)") {
+                    TiptapWebView(controller: controller)
+                }
+                Divider()
+                pane("Prose (ours)") {
+                    VStack(spacing: 0) {
+                        ParityProseView(controller: controller, editor: editor)
+                        Divider()
+                        SimpleEditorToolbar(editor: editor)
+                    }
+                }
+            }
+        }
+        .navigationTitle(demo.title)
+        .navigationBarTitleDisplayMode(.inline)
+        .ignoresSafeArea(.keyboard)
+    }
+
+    private func pane<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(spacing: 0) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 5)
+                .background(.quaternary)
+            content()
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+private struct ParityActionBar: View {
+    @ObservedObject var controller: ParityController
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button { controller.sendLeftToRight() } label: {
+                Label("Send →", systemImage: "arrow.right")
+            }
+            Button { controller.sendRightToLeft() } label: {
+                Label("← Send", systemImage: "arrow.left")
+            }
+            Spacer()
+            Button { controller.reset() } label: {
+                Label("Reset", systemImage: "arrow.counterclockwise")
+            }
+            Button(role: .destructive) { controller.clear() } label: {
+                Label("Clear", systemImage: "trash")
+            }
+        }
+        .labelStyle(.titleAndIcon)
+        .buttonStyle(.bordered)
+        .font(.subheadline)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+    }
+}
+
+/// Owns the live references to both editors and bridges ProseMirror-JSON between
+/// them. The reference editor lives in JavaScript, so reads are async (one
+/// `evaluateJavaScript` round trip); writes inject the JSON object straight into
+/// a call (JSON is valid JS, so no escaping is needed).
+@MainActor private final class ParityController: ObservableObject {
+    weak var webView: WKWebView?
+    weak var proseView: ProseView?
+    private var tiptapReady = false
+
+    private let encoder = JSONEncoder()
+    private let decoder = JSONDecoder()
+
+    /// Called once the web editor reports it is live; seeds it with the same
+    /// showcase document our editor opens on.
+    func tiptapDidBecomeReady() {
+        tiptapReady = true
+        pushToTiptap(.parityShowcase)
+    }
+
+    func sendLeftToRight() {
+        readTiptap { [weak self] document in
+            guard let self, let document else { return }
+            self.proseView?.document = document
+        }
+    }
+
+    func sendRightToLeft() {
+        guard let document = proseView?.document else { return }
+        pushToTiptap(document)
+    }
+
+    func reset() {
+        proseView?.document = .parityShowcase
+        pushToTiptap(.parityShowcase)
+    }
+
+    func clear() {
+        let empty = Document(.doc([.paragraph([])]))
+        proseView?.document = empty
+        pushToTiptap(empty)
+    }
+
+    private func pushToTiptap(_ document: Document) {
+        guard let webView, tiptapReady,
+              let data = try? encoder.encode(document),
+              let json = String(data: data, encoding: .utf8) else { return }
+        webView.evaluateJavaScript("window.setDocObject(\(json)); true;")
+    }
+
+    private func readTiptap(_ completion: @escaping (Document?) -> Void) {
+        guard let webView, tiptapReady else { completion(nil); return }
+        webView.evaluateJavaScript("window.getDoc()") { result, _ in
+            MainActor.assumeIsolated {
+                guard let json = result as? String,
+                      let data = json.data(using: .utf8),
+                      let document = try? self.decoder.decode(Document.self, from: data) else {
+                    completion(nil)
+                    return
+                }
+                completion(document)
+            }
+        }
+    }
+}
+
+/// A real Tiptap / ProseMirror editor in a `WKWebView`, configured to mirror our
+/// Schema. The HTML loads Tiptap from a CDN, so this pane needs network access.
+private struct TiptapWebView: UIViewRepresentable {
+    let controller: ParityController
+
+    func makeUIView(context: Context) -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        let userContent = WKUserContentController()
+        userContent.add(context.coordinator, name: "ready")
+        configuration.userContentController = userContent
+
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.navigationDelegate = context.coordinator
+        controller.webView = webView
+        context.coordinator.controller = controller
+
+        if let url = Bundle.main.url(forResource: "TiptapEditor", withExtension: "html"),
+           let html = try? String(contentsOf: url, encoding: .utf8) {
+            // Load via a synthetic https base URL (never actually fetched) so the
+            // document has a normal origin — file:// origins block the ES-module
+            // imports the editor depends on.
+            webView.loadHTMLString(html, baseURL: URL(string: "https://prose.local/"))
+        }
+        return webView
+    }
+
+    func updateUIView(_ uiView: WKWebView, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
+        weak var controller: ParityController?
+
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            guard message.name == "ready" else { return }
+            controller?.tiptapDidBecomeReady()
+        }
+    }
+}
+
+/// Our editor for the right pane: bound to both the shared `EditorProxy` (so the
+/// formatting toolbar tracks it) and the `ParityController` (so the action bar
+/// can read and replace its document). It does not auto-focus, so the keyboard
+/// stays down until tapped and both panes remain visible side by side.
+private struct ParityProseView: UIViewRepresentable {
+    let controller: ParityController
+    let editor: EditorProxy
+
+    func makeUIView(context: Context) -> ProseView {
+        let view = ProseView(document: .parityShowcase)
+        editor.bind(view)
+        controller.proseView = view
+        return view
+    }
+
+    func updateUIView(_ uiView: ProseView, context: Context) {}
+}
+
 private struct ProseEditorView: UIViewRepresentable {
     let document: Document
     var proxy: EditorProxy?
@@ -670,6 +881,91 @@ extension Document {
         .heading(level: 3, [.text("Headings are level-aware")]),
         .heading(level: 4, [.text("H4 is smaller than H1")]),
         .paragraph([.text("Pick a block type from the leftmost menu, then keep typing.")]),
+    ]))
+
+    /// A made-up document about a text editor that exercises every block and
+    /// inline style our Schema supports, so the parity screen can round-trip the
+    /// full feature set through the reference editor.
+    fileprivate static let parityShowcase = Document(.doc([
+        .heading(level: 1, [.text("The Quill Field Guide")]),
+        .paragraph([
+            .text("A short manual on the craft of editing text. It mixes "),
+            .text("bold", marks: [.bold]),
+            .text(", "),
+            .text("italic", marks: [.italic]),
+            .text(", "),
+            .text("underline", marks: [Mark(type: "underline")]),
+            .text(", "),
+            .text("strikethrough", marks: [Mark(type: "strike")]),
+            .text(", and "),
+            .text("inline code", marks: [.code]),
+            .text(" so every mark has a turn."),
+        ]),
+        .paragraph([
+            .text("Marks also "),
+            .text("compose", marks: [.bold, .italic]),
+            .text(": this run is bold and italic at once. Chemists write H"),
+            .text("2", marks: [Mark(type: "subscript")]),
+            .text("O, while physicists prefer E = mc"),
+            .text("2", marks: [Mark(type: "superscript")]),
+            .text("."),
+        ]),
+        .heading(level: 2, [.text("Highlights and links")]),
+        .paragraph([
+            .text("Reviewers reach for a "),
+            .text("yellow highlighter", marks: [Mark(type: "highlight", attrs: ["color": .string("#ffd54f")])]),
+            .text(", and sometimes "),
+            .text("a blue one", marks: [Mark(type: "highlight", attrs: ["color": .string("#80d8ff")])]),
+            .text(" for a second pass. References point outward, like "),
+            .text("example.com", marks: [Mark(type: "link", attrs: ["href": .string("https://example.com")])]),
+            .text("."),
+        ]),
+        Node(
+            type: "paragraph",
+            attrs: ["textAlign": .string("center")],
+            content: [.text("A centered caption sits beneath the figure.")]
+        ),
+        Node(
+            type: "paragraph",
+            attrs: ["textAlign": .string("right")],
+            content: [.text("— attributed, flush right")]
+        ),
+        Node(
+            type: "paragraph",
+            attrs: ["textAlign": .string("justify")],
+            content: [.text("Justified body text spreads each line to both margins, which is how dense columns keep a tidy right edge even when the words inside them vary in length from one line to the next.")]
+        ),
+        .heading(level: 3, [.text("A word of caution")]),
+        .blockquote([
+            .paragraph([.text("Structure first, styling second. A document is a tree of blocks; the look is only a projection of it.")]),
+            .paragraph([.text("— every editor's first lesson")]),
+        ]),
+        .heading(level: 4, [.text("Things to try")]),
+        .bulletList([
+            .listItem([.paragraph([.text("Select a word and toggle a mark.")])]),
+            .listItem([.paragraph([.text("Turn a paragraph into a heading.")])]),
+            .listItem([.paragraph([.text("Send this document the other way and compare.")])]),
+        ]),
+        .heading(level: 5, [.text("A numbered recipe")]),
+        .orderedList([
+            .listItem([.paragraph([.text("Place the caret where you want a split.")])]),
+            .listItem([
+                .paragraph([.text("Press Return; the block divides. Nested steps follow:")]),
+                .orderedList([
+                    .listItem([.paragraph([.text("The inner list numbers from one again.")])]),
+                    .listItem([.paragraph([.text("Shift-Tab lifts an item back out.")])]),
+                ]),
+            ]),
+            .listItem([.paragraph([.text("Backspace at the start joins it back.")])]),
+        ]),
+        .heading(level: 6, [.text("A checklist before you ship")]),
+        .taskList([
+            .taskItem(checked: true, [.paragraph([.text("Round-trip every block type.")])]),
+            .taskItem(checked: true, [.paragraph([.text("Round-trip every inline mark.")])]),
+            .taskItem(checked: false, [.paragraph([.text("Confirm alignment survives the trip.")])]),
+            .taskItem(checked: false, [.paragraph([.text("Confirm nested lists survive the trip.")])]),
+        ]),
+        .paragraph([.text("That is the whole vocabulary — headings one through six, paragraphs, alignment, every mark, quotes, all three list kinds, and nesting.")]),
     ]))
 
     fileprivate static let basics = Document(.doc([
