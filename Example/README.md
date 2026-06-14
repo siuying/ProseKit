@@ -9,6 +9,12 @@ on a different document:
   every inline mark (bold, italic, underline, strike, code, super/subscript),
   highlight swatches, links, and text alignment. The block dropdown and mark
   buttons reflect the editor's active state.
+- **Tiptap Parity** — a split screen with a real Tiptap/ProseMirror editor on
+  the left and our editor on the right. The action bar sends the
+  ProseMirror-JSON document either way, resets both to a showcase document that
+  exercises every block and mark, or clears both — a truth test for whether our
+  editor reads and writes the model the same way the reference does. The left
+  pane loads Tiptap from a CDN, so it needs network access.
 - **Rich Text Basics** — headings, paragraphs, and inline marks.
 - **Marks & Formatting** — toggle marks/headings from a toolbar or ⌘B/⌘I.
 - **Selection & Autoscroll** — system selection handles, edit menu, autoscroll.
