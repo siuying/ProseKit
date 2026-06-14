@@ -90,9 +90,9 @@ final class ProseExampleUITests: XCTestCase {
     }
 
     @MainActor
-    func testLiveTypingAroundAParagraphBreakStaysResponsive() throws {
+    private func launchTypingBenchmark(_ arguments: [String], prefix: String) -> [TimeInterval] {
         let app = XCUIApplication()
-        app.launchArguments = ["-paragraphs", "800"]
+        app.launchArguments = arguments
         app.launch()
 
         // Tap the editor so the XCUI event synthesizer sees keyboard focus
@@ -106,18 +106,46 @@ final class ProseExampleUITests: XCTestCase {
             let start = Date()
             app.typeText(text)
             let elapsed = Date().timeIntervalSince(start)
-            print("[live-typing] \(label): \(String(format: "%.3f", elapsed))s")
+            print("[\(prefix)] \(label): \(String(format: "%.3f", elapsed))s")
             return elapsed
         }
 
-        // XCUITest event synthesis has its own per-keystroke overhead of
-        // roughly a second, so the bound is deliberately loose; the bug this
-        // guards against blew past it by an order of magnitude.
-        let budget: TimeInterval = 5
-        XCTAssertLessThan(timedType("a", label: "first char after focusing"), budget)
-        XCTAssertLessThan(timedType("\n", label: "Return (new line)"), budget)
-        XCTAssertLessThan(timedType("b", label: "first char after Return"), budget)
-        XCTAssertLessThan(timedType("c", label: "second char after Return"), budget)
+        return [
+            timedType("a", label: "first char after focusing"),
+            timedType("\n", label: "Return (new line)"),
+            timedType("b", label: "first char after Return"),
+            timedType("c", label: "second char after Return"),
+        ]
+    }
+
+    @MainActor
+    func testLiveTypingAroundAParagraphBreakStaysResponsive() throws {
+        let timings = launchTypingBenchmark(["-paragraphs", "800"], prefix: "live-typing")
+
+        // UITextView on the same 800-paragraph fixture is ~3.9s for first focus,
+        // ~3.5s for Return, and ~2.1s steady-state in this XCUITest harness.
+        // Keep Prose within that envelope plus simulator variance.
+        let budget: TimeInterval = 4.5
+        for timing in timings {
+            XCTAssertLessThan(timing, budget)
+        }
+    }
+
+    @MainActor
+    func testLiveTypingUITextViewBaseline() throws {
+        let timings = launchTypingBenchmark(["-uitextview-paragraphs", "800"], prefix: "uitextview-live-typing")
+        for timing in timings {
+            XCTAssertLessThan(timing, 5)
+        }
+    }
+
+    @MainActor
+    func testLiveTypingSimpleEditorStaysNearUITextViewBaseline() throws {
+        let timings = launchTypingBenchmark(["-simple"], prefix: "simple-live-typing")
+        let budget: TimeInterval = 4.5
+        for timing in timings {
+            XCTAssertLessThan(timing, budget)
+        }
     }
 
     /// The formatting toolbar floats in the keyboard's inputAccessoryView and

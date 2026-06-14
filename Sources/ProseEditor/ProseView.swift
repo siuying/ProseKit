@@ -303,9 +303,6 @@ import UIKit
     private func setSelectionDisplayActivated(_ activated: Bool) {
         for case let display as UITextSelectionDisplayInteraction in interactions {
             display.isActivated = activated
-            if activated {
-                display.setNeedsSelectionUpdate()
-            }
         }
     }
 

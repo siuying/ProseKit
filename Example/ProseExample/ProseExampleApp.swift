@@ -17,6 +17,9 @@ struct ProseExampleApp: App {
                 // synchronous render passes so the measurement isn't swamped by
                 // XCUITest's ~0.8s/keystroke event-synthesis overhead.
                 ToolbarRebuildBenchmark()
+            } else if let count = Self.syntheticUITextViewParagraphCount {
+                BaselineTextEditorView(text: Document.syntheticPlainText(paragraphs: count))
+                    .ignoresSafeArea(.keyboard)
             } else if let count = Self.syntheticParagraphCount {
                 ProseEditorView(document: .synthetic(paragraphs: count))
                     .ignoresSafeArea(.keyboard)
@@ -43,6 +46,12 @@ struct ProseExampleApp: App {
 
     private static let syntheticParagraphCount: Int? = {
         guard let index = CommandLine.arguments.firstIndex(of: "-paragraphs"),
+              CommandLine.arguments.indices.contains(index + 1) else { return nil }
+        return Int(CommandLine.arguments[index + 1])
+    }()
+
+    private static let syntheticUITextViewParagraphCount: Int? = {
+        guard let index = CommandLine.arguments.firstIndex(of: "-uitextview-paragraphs"),
               CommandLine.arguments.indices.contains(index + 1) else { return nil }
         return Int(CommandLine.arguments[index + 1])
     }()
@@ -447,29 +456,70 @@ private struct SimpleEditorToolbar: View {
 /// Lets SwiftUI toolbar buttons reach the underlying ProseView and observe its
 /// active-state changes.
 @MainActor private final class EditorProxy: ObservableObject {
+    private struct ToolbarState: Equatable {
+        var activeMarks: Set<Mark> = []
+        var headingLevel: Int?
+        var activeListType: String?
+        var canSinkListItem = false
+        var canLiftListItem = false
+        var canToggleTaskItemChecked = false
+        var canSetLink = false
+        var hasHighlight = false
+    }
+
+    private static let trackedMarks: [Mark] = [
+        .bold,
+        .italic,
+        .underline,
+        .strike,
+        .code,
+        .superscript,
+        .subscript,
+    ]
+
     weak var view: ProseView?
+    @Published private var toolbarState = ToolbarState()
     @Published private(set) var revision = 0
 
     func bind(_ view: ProseView) {
         self.view = view
-        view.onStateChange = { [weak self] in self?.revision &+= 1 }
+        updateToolbarState(from: view)
+        view.onStateChange = { [weak self, weak view] in
+            guard let self, let view else { return }
+            self.updateToolbarState(from: view)
+        }
     }
 
     /// Drives the same `revision` bump a keystroke / caret move does, for the
     /// in-process toolbar-rebuild benchmark.
     func bumpRevisionForBenchmark() { revision &+= 1 }
 
-    func isActive(_ mark: Mark) -> Bool {
-        view?.isActive(mark) ?? false
+    private func updateToolbarState(from view: ProseView) {
+        let next = ToolbarState(
+            activeMarks: Set(Self.trackedMarks.filter { view.isActive($0) }),
+            headingLevel: view.activeHeadingLevel,
+            activeListType: view.activeListType,
+            canSinkListItem: view.canSinkListItem,
+            canLiftListItem: view.canLiftListItem,
+            canToggleTaskItemChecked: view.canToggleTaskItemChecked,
+            canSetLink: view.canSetLink,
+            hasHighlight: view.hasHighlight
+        )
+        guard next != toolbarState else { return }
+        toolbarState = next
     }
 
-    var headingLevel: Int? { view?.activeHeadingLevel }
-    var activeListType: String? { view?.activeListType }
-    var canSinkListItem: Bool { view?.canSinkListItem ?? false }
-    var canLiftListItem: Bool { view?.canLiftListItem ?? false }
-    var canToggleTaskItemChecked: Bool { view?.canToggleTaskItemChecked ?? false }
-    var canSetLink: Bool { view?.canSetLink ?? false }
-    var hasHighlight: Bool { view?.hasHighlight ?? false }
+    func isActive(_ mark: Mark) -> Bool {
+        toolbarState.activeMarks.contains(mark)
+    }
+
+    var headingLevel: Int? { toolbarState.headingLevel }
+    var activeListType: String? { toolbarState.activeListType }
+    var canSinkListItem: Bool { toolbarState.canSinkListItem }
+    var canLiftListItem: Bool { toolbarState.canLiftListItem }
+    var canToggleTaskItemChecked: Bool { toolbarState.canToggleTaskItemChecked }
+    var canSetLink: Bool { toolbarState.canSetLink }
+    var hasHighlight: Bool { toolbarState.hasHighlight }
 }
 
 /// Measures how long the formatting toolbar takes to react to one editor-state
@@ -548,15 +598,39 @@ private struct ProseEditorView: UIViewRepresentable {
     }
 }
 
+private struct BaselineTextEditorView: UIViewRepresentable {
+    let text: String
+
+    func makeUIView(context: Context) -> UITextView {
+        let view = UITextView()
+        view.font = .systemFont(ofSize: 17)
+        view.text = text
+        DispatchQueue.main.async {
+            _ = view.becomeFirstResponder()
+        }
+        return view
+    }
+
+    func updateUIView(_ uiView: UITextView, context: Context) {}
+}
+
 // MARK: - Demo documents
 
 extension Document {
     static func synthetic(paragraphs count: Int) -> Document {
+        Document(.doc((1...count).map { n in
+            .paragraph([.text(Self.syntheticParagraphText(n))])
+        }))
+    }
+
+    static func syntheticPlainText(paragraphs count: Int) -> String {
+        (1...count).map(Self.syntheticParagraphText).joined(separator: "\n")
+    }
+
+    private static func syntheticParagraphText(_ n: Int) -> String {
         let sentence = "The quick brown fox jumps over the lazy dog near the quiet river bank. "
         let body = String(repeating: sentence, count: 3)
-        return Document(.doc((1...count).map { n in
-            .paragraph([.text("Paragraph \(n). " + body)])
-        }))
+        return "Paragraph \(n). " + body
     }
 
     fileprivate static let simpleEditor = Document(.doc([

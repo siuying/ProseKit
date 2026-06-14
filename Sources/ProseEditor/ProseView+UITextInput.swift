@@ -10,10 +10,12 @@ extension ProseView {
         get { ProseTextRange(anchor: state.selection.anchor, head: state.selection.head) }
         set {
             guard let range = newValue as? ProseTextRange else { return }
+            let selection = range.textSelection
+            guard selection != state.selection else { return }
             inputDelegate?.selectionWillChange(self)
             state = EditorState(
                 document: state.document,
-                selection: range.textSelection,
+                selection: selection,
                 lastTransaction: state.lastTransaction,
                 typingMarks: state.typingMarks
             )
