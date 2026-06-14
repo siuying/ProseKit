@@ -1,4 +1,4 @@
-# Prose
+# ProseKit
 
 A native iOS rich-text editor built on a custom CoreText layout engine over a
 ProseMirror-style document model. The document tree is the structural authority;

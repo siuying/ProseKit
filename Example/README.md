@@ -1,4 +1,4 @@
-# Prose Example
+# ProseKit Example
 
 Open `ProseExample.xcodeproj`, select an iOS simulator, and run the
 `ProseExample` scheme. The app is a catalog of demos, each hosting a `ProseView`
