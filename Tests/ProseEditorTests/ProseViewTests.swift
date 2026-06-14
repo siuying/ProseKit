@@ -91,6 +91,19 @@ final class ProseViewTests: XCTestCase {
         XCTAssertEqual(spy.events, [.selectionWillChange, .selectionDidChange])
     }
 
+    func testSettingSelectedTextRangeToCurrentSelectionIsANoop() throws {
+        let view = makeView(Document(.doc([.paragraph([.text("hello world")])])))
+        let spy = InputDelegateSpy()
+        var stateChangeCount = 0
+        view.inputDelegate = spy
+        view.onStateChange = { stateChangeCount += 1 }
+
+        view.selectedTextRange = ProseTextRange(anchor: 2, head: 2)
+
+        XCTAssertEqual(spy.events, [])
+        XCTAssertEqual(stateChangeCount, 0)
+    }
+
     func testBlockFormatCommandPreservesSelectionAndNotifiesInputDelegate() throws {
         let view = makeView(Document(.doc([.paragraph([.text("hello world")])])))
         view.selectedTextRange = ProseTextRange(anchor: 2, head: 7)
