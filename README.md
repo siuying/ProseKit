@@ -5,6 +5,8 @@ A native iOS rich-text editor built on a custom CoreText layout engine over a
 the structural authority; the rendered layout is a projection of it, never the
 other way around.
 
+<video src="assets/demo_s.mp4" controls width="100%"></video>
+
 ProseKit is written in pure Swift with no web view. It typesets directly with
 CoreText, models every edit as an invertible, serializable step on an immutable
 document, and speaks the same [Tiptap](https://tiptap.dev) / ProseMirror JSON
@@ -49,7 +51,7 @@ own) to your target.
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/siuying/ProseKit.git", from: "1.0.0"),
+    .package(url: "https://github.com/siuying/ProseKit.git", from: "0.1.0"),
 ],
 targets: [
     .target(
