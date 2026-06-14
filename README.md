@@ -5,7 +5,7 @@ A native iOS rich-text editor built on a custom CoreText layout engine over a
 the structural authority; the rendered layout is a projection of it, never the
 other way around.
 
-<video src="assets/demo_s.mp4" controls width="100%"></video>
+![Demo](https://github.com/user-attachments/assets/1837bf9f-1688-4950-9568-28c6cf599c6a)
 
 ProseKit is written in pure Swift with no web view. It typesets directly with
 CoreText, models every edit as an invertible, serializable step on an immutable
