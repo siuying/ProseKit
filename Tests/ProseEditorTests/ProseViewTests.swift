@@ -391,6 +391,45 @@ final class ProseViewTests: XCTestCase {
         XCTAssertEqual(view.text(in: view.selectedTextRange!), "Testing")
     }
 
+    // Option+Arrow word movement, matching UITextView. "hello world" spans
+    // positions 2..<13: 'h'=2 … 'o'=6, ' '=7, 'w'=8 … 'd'=12, end=13.
+    func testOptionArrowMovesCaretByWord() throws {
+        let view = makeView(Document(.doc([.paragraph([.text("hello world")])])))
+
+        // From the start of "hello", Option+Right lands at the end of "hello".
+        view.selectedTextRange = ProseTextRange(anchor: 2, head: 2)
+        view.moveCaretByWord(.right, extending: false)
+        var selection = view.selectedTextRange as! ProseTextRange
+        XCTAssertTrue(selection.isEmpty)
+        XCTAssertEqual(selection.head, 7, "Option+Right stops at the end of the current word")
+
+        // Again, skipping the space, to the end of "world".
+        view.moveCaretByWord(.right, extending: false)
+        selection = view.selectedTextRange as! ProseTextRange
+        XCTAssertEqual(selection.head, 13, "Option+Right crosses the space to the next word end")
+
+        // Option+Left walks back to the start of "world", then "hello".
+        view.moveCaretByWord(.left, extending: false)
+        selection = view.selectedTextRange as! ProseTextRange
+        XCTAssertEqual(selection.head, 8, "Option+Left stops at the start of the word")
+        view.moveCaretByWord(.left, extending: false)
+        selection = view.selectedTextRange as! ProseTextRange
+        XCTAssertEqual(selection.head, 2, "Option+Left crosses the space to the previous word start")
+    }
+
+    // Option+Shift+Arrow extends the selection by whole words, anchoring where
+    // it started.
+    func testOptionShiftArrowExtendsSelectionByWord() throws {
+        let view = makeView(Document(.doc([.paragraph([.text("hello world")])])))
+
+        view.selectedTextRange = ProseTextRange(anchor: 2, head: 2)
+        view.moveCaretByWord(.right, extending: true)
+        let selection = view.selectedTextRange as! ProseTextRange
+        XCTAssertEqual(selection.anchor, 2, "the anchor stays where the selection began")
+        XCTAssertEqual(selection.head, 7, "the head extends to the word boundary")
+        XCTAssertEqual(view.text(in: selection), "hello")
+    }
+
     func testOffsetArithmeticMatchesTextInAcrossBlockBoundaries() throws {
         // UITextInput contract: offset(from:to:) must equal the character
         // count of text(in:) for the same range, and position(from:offset:)
