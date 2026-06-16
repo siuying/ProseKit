@@ -192,8 +192,8 @@ See [`CONTEXT.md`](./CONTEXT.md) for the full domain glossary and the
 ## Example app
 
 The [`Example/`](./Example) directory contains **ProseExample**, a SwiftUI
-catalog of demos (Simple Editor, Tiptap parity, lists, large documents, and
-more). Open `Example/ProseExample.xcodeproj`, pick an iOS simulator, and run the
+catalog of demos (Simple Editor, Tiptap parity, UITextView comparison, lists,
+large documents, and more). Open `Example/ProseExample.xcodeproj`, pick an iOS simulator, and run the
 `ProseExample` scheme. See [`Example/README.md`](./Example/README.md) for details.
 
 ## Testing
