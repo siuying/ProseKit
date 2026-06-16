@@ -261,6 +261,28 @@ final class ProseViewTests: XCTestCase {
         XCTAssertTrue(selection.isEmpty)
     }
 
+    // Paste moves the caret to the end of the inserted run programmatically, so
+    // the input delegate must be told the selection changed — otherwise the
+    // system caret chrome lags behind state.selection and stays where it was.
+    func testPasteNotifiesInputDelegateOfSelectionChange() throws {
+        let view = makeView(Document(.doc([.paragraph([.text("hello world")])])))
+        let pasteboard = UIPasteboard.withUniqueName()
+        view.pasteboard = pasteboard
+        pasteboard.string = "brave new"
+
+        // Caret before "world" (position 8) — a collapsed insertion, not a replace.
+        view.selectedTextRange = ProseTextRange(anchor: 8, head: 8)
+        let spy = InputDelegateSpy()
+        view.inputDelegate = spy
+
+        view.paste(nil)
+
+        XCTAssertEqual(spy.events.first, .selectionWillChange,
+                       "paste opens with selectionWillChange so the system tracks the caret move")
+        XCTAssertEqual(spy.events.last, .selectionDidChange,
+                       "paste closes with selectionDidChange so the caret chrome catches up to the new caret")
+    }
+
     func testPastingURLOntoSelectionLinksItInsteadOfReplacing() throws {
         let view = makeView(Document(.doc([.paragraph([.text("hello world")])])))
         let pasteboard = UIPasteboard.withUniqueName()

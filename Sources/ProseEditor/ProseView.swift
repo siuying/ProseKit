@@ -534,7 +534,14 @@ import UIKit
             runCommand(Commands.setLink(href: href))
             return
         }
+        // Paste is programmatic: unlike typed text the system did not drive the
+        // insertion, so it must be told the selection moved to the end of the
+        // pasted run — otherwise the caret chrome lags behind state.selection.
+        // (insertText's performEdit only brackets the text change.)
+        inputDelegate?.selectionWillChange(self)
         insertText(text)
+        refreshSelectionDisplayGeometry()
+        inputDelegate?.selectionDidChange(self)
     }
 
     public override func select(_ sender: Any?) {
