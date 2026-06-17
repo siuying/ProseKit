@@ -373,9 +373,22 @@ import UIKit
     func runCommand(_ command: Command) {
         // A command that didn't dispatch leaves a stale lastTransaction;
         // its dirty rect repaints an already-clean region, never too little.
+        let selectionBefore = state.selection
         inputDelegate?.selectionWillChange(self)
         performEdit { _ = try command.run(in: &state) }
-        refreshSelectionDisplayGeometry()
+        // Block formatting (heading/list/align) keeps the *same* selection range
+        // but reflows the glyphs under it, so UIKit — which treats an unchanged
+        // range as nothing to re-measure — must be forced to refresh the
+        // selection geometry. A command that *moves* the caret (e.g. splitBlock)
+        // does not: the range change UIKit observes via selectionDidChange
+        // refreshes it on the cheap path keyboard caret moves take. Forcing it
+        // there too lagged ~1s when the command ran inside an input transaction
+        // (e.g. splitBlock per newline during a multi-line paste); see
+        // docs/research/2026-06-14-live-keyboard-responder-performance.md
+        // finding 1 and performEditMenuEdit.
+        if state.selection == selectionBefore {
+            refreshSelectionDisplayGeometry()
+        }
         inputDelegate?.selectionDidChange(self)
     }
 
