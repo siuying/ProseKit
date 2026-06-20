@@ -33,4 +33,31 @@ final class ProseExampleMacUITests: XCTestCase {
         value = try XCTUnwrap(editor.value as? String)
         XCTAssertFalse(value.hasSuffix("z"))
     }
+
+    @MainActor
+    func testMacEditorCopiesPastesAndCutsSelection() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        let editor = app.textViews["Prose editor"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 10))
+        editor.click()
+        editor.typeKey(.rightArrow, modifierFlags: [.command])
+        editor.typeText("CLIP")
+
+        editor.typeKey(.leftArrow, modifierFlags: [.shift])
+        editor.typeKey("c", modifierFlags: [.command])
+        editor.typeKey(.rightArrow, modifierFlags: [])
+        editor.typeKey("v", modifierFlags: [.command])
+
+        var value = try XCTUnwrap(editor.value as? String)
+        XCTAssertTrue(value.contains("CLIPP"))
+
+        editor.typeKey(.leftArrow, modifierFlags: [.shift])
+        editor.typeKey("x", modifierFlags: [.command])
+
+        value = try XCTUnwrap(editor.value as? String)
+        XCTAssertTrue(value.contains("CLIP"))
+        XCTAssertFalse(value.contains("CLIPP"))
+    }
 }

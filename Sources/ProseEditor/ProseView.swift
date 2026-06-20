@@ -21,7 +21,7 @@ import UIKit
     public var automaticallyAdjustsForKeyboard = true
     /// The pasteboard edit-menu actions read and write. Injectable because
     /// `UIPasteboard.general` is unavailable to unhosted test bundles.
-    public var pasteboard: UIPasteboard = .general
+    public var pasteboard: Pasteboard = UIPasteboard.general
 
     let core: EditorCore
     var state: EditorState { core.state }
@@ -509,12 +509,16 @@ import UIKit
 
     public override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
         switch action {
-        case #selector(copy(_:)), #selector(cut(_:)):
-            return !state.selection.isCollapsed
+        case #selector(copy(_:)):
+            return core.canPerformEditAction(.copy, pasteboardHasStrings: pasteboard.hasStrings)
+        case #selector(cut(_:)):
+            return core.canPerformEditAction(.cut, pasteboardHasStrings: pasteboard.hasStrings)
         case #selector(paste(_:)):
-            return pasteboard.hasStrings
-        case #selector(select(_:)), #selector(selectAll(_:)):
-            return hasText
+            return core.canPerformEditAction(.paste, pasteboardHasStrings: pasteboard.hasStrings)
+        case #selector(select(_:)):
+            return core.canPerformEditAction(.select, pasteboardHasStrings: pasteboard.hasStrings)
+        case #selector(selectAll(_:)):
+            return core.canPerformEditAction(.selectAll, pasteboardHasStrings: pasteboard.hasStrings)
         default:
             return super.canPerformAction(action, withSender: sender)
         }

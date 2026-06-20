@@ -3,7 +3,7 @@ import AppKit
 import ProseModel
 import SwiftUI
 
-@MainActor public final class ProseView: NSScrollView {
+@MainActor public final class ProseView: NSScrollView, NSUserInterfaceValidations, NSMenuItemValidation {
     public var document: Document {
         get { core.document }
         set {
@@ -13,6 +13,7 @@ import SwiftUI
     }
 
     public let core: EditorCore
+    public var pasteboard: Pasteboard = NSPasteboard.general
     let canvasView = MacCanvasView()
     let selectionLayer = MacSelectionLayerView()
     private let editorContentView = MacEditorContentView()
@@ -127,6 +128,37 @@ import SwiftUI
         default:
             super.doCommand(by: selector)
         }
+    }
+
+    @objc public func copy(_ sender: Any?) {
+        guard !core.selection.isCollapsed else { return }
+        pasteboard.string = selectedPlainText()
+    }
+
+    @objc public func cut(_ sender: Any?) {
+        guard !core.selection.isCollapsed else { return }
+        pasteboard.string = selectedPlainText()
+        do {
+            try core.insertText("")
+        } catch is StepError {
+            // Unsupported edit: leave the document untouched.
+        } catch {
+            assertionFailure("cut failed: \(error)")
+        }
+        relayout()
+    }
+
+    @objc public func paste(_ sender: Any?) {
+        guard let text = pasteboard.string else { return }
+        insertTextFromInput(text, replacementRange: NSRange(location: NSNotFound, length: 0))
+    }
+
+    public func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
+        canPerformEditAction(for: item.action)
+    }
+
+    public func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        canPerformEditAction(for: menuItem.action)
     }
 
     func placeCaret(atContentPoint point: CGPoint) {
@@ -301,6 +333,25 @@ import SwiftUI
             selectWord(atContentPoint: point)
         } else {
             beginSelection(atContentPoint: point)
+        }
+    }
+
+    private func selectedPlainText() -> String {
+        let lower = min(core.selection.anchor, core.selection.head)
+        let upper = max(core.selection.anchor, core.selection.head)
+        return core.document.plainText(from: lower, to: upper)
+    }
+
+    private func canPerformEditAction(for selector: Selector?) -> Bool {
+        switch selector {
+        case #selector(copy(_:)):
+            return core.canPerformEditAction(.copy, pasteboardHasStrings: pasteboard.hasStrings)
+        case #selector(cut(_:)):
+            return core.canPerformEditAction(.cut, pasteboardHasStrings: pasteboard.hasStrings)
+        case #selector(paste(_:)):
+            return core.canPerformEditAction(.paste, pasteboardHasStrings: pasteboard.hasStrings)
+        default:
+            return true
         }
     }
 

@@ -241,6 +241,75 @@ final class MacProseViewTests: XCTestCase {
         XCTAssertEqual(view.document.plainText, " ")
     }
 
+    func testMacCopyPutsSelectedPlainTextOnPasteboard() throws {
+        let view = ProseView(document: Document(.doc([
+            .paragraph([.text("hello world")]),
+        ])))
+        let pasteboard = TestPasteboard()
+        view.pasteboard = pasteboard
+        let start = try XCTUnwrap(view.document.position(ofTextInBlockAt: 0))
+
+        view.core.setSelection(TextSelection(anchor: start, head: start + 5))
+        view.copy(nil)
+
+        XCTAssertEqual(pasteboard.string, "hello")
+    }
+
+    func testMacCutCopiesSelectionAndRemovesItFromTheDocument() throws {
+        let view = ProseView(document: Document(.doc([
+            .paragraph([.text("hello world")]),
+        ])))
+        let pasteboard = TestPasteboard()
+        view.pasteboard = pasteboard
+        let start = try XCTUnwrap(view.document.position(ofTextInBlockAt: 0))
+
+        view.core.setSelection(TextSelection(anchor: start, head: start + 6))
+        view.cut(nil)
+
+        XCTAssertEqual(pasteboard.string, "hello ")
+        XCTAssertEqual(view.document.plainText, "world")
+        XCTAssertEqual(view.core.selection, TextSelection(anchor: start, head: start))
+        XCTAssertEqual(view.selectionLayer.selection, view.core.selection)
+    }
+
+    func testMacPasteReplacesSelectionWithPasteboardText() throws {
+        let view = ProseView(document: Document(.doc([
+            .paragraph([.text("hello world")]),
+        ])))
+        let pasteboard = TestPasteboard()
+        pasteboard.string = "brave new"
+        view.pasteboard = pasteboard
+        let start = try XCTUnwrap(view.document.position(ofTextInBlockAt: 0))
+
+        view.core.setSelection(TextSelection(anchor: start, head: start + 5))
+        view.paste(nil)
+
+        XCTAssertEqual(view.document.plainText, "brave new world")
+        XCTAssertEqual(view.core.selection, TextSelection(anchor: start + 9, head: start + 9))
+        XCTAssertEqual(view.selectionLayer.selection, view.core.selection)
+    }
+
+    func testMacClipboardActionsValidateThroughResponderItems() throws {
+        let view = ProseView(document: Document(.doc([
+            .paragraph([.text("hello world")]),
+        ])))
+        let pasteboard = TestPasteboard()
+        view.pasteboard = pasteboard
+        let start = try XCTUnwrap(view.document.position(ofTextInBlockAt: 0))
+        view.core.setSelection(TextSelection(anchor: start, head: start))
+
+        XCTAssertFalse(view.validateUserInterfaceItem(TestValidatedItem(action: #selector(ProseView.copy(_:)))))
+        XCTAssertFalse(view.validateUserInterfaceItem(TestValidatedItem(action: #selector(ProseView.cut(_:)))))
+        XCTAssertFalse(view.validateMenuItem(NSMenuItem(title: "Paste", action: #selector(ProseView.paste(_:)), keyEquivalent: "")))
+
+        pasteboard.string = "mac"
+        XCTAssertTrue(view.validateUserInterfaceItem(TestValidatedItem(action: #selector(ProseView.paste(_:)))))
+
+        view.core.setSelection(TextSelection(anchor: start, head: start + 5))
+        XCTAssertTrue(view.validateMenuItem(NSMenuItem(title: "Copy", action: #selector(ProseView.copy(_:)), keyEquivalent: "")))
+        XCTAssertTrue(view.validateUserInterfaceItem(TestValidatedItem(action: #selector(ProseView.cut(_:)))))
+    }
+
     func testMacHighlightPaletteResolvesAcrossAppearances() throws {
         let palette = try XCTUnwrap(HighlightColor.color(for: "#ffd54f"))
         let light = try XCTUnwrap(NSAppearance(named: .aqua))
@@ -259,6 +328,23 @@ final class MacProseViewTests: XCTestCase {
             resolved = color.usingColorSpace(.deviceRGB) ?? color
         }
         return [resolved.redComponent, resolved.greenComponent, resolved.blueComponent, resolved.alphaComponent]
+    }
+}
+
+private final class TestPasteboard: ProseEditor.Pasteboard {
+    var string: String?
+
+    var hasStrings: Bool {
+        string != nil
+    }
+}
+
+private final class TestValidatedItem: NSObject, NSValidatedUserInterfaceItem {
+    let action: Selector?
+    let tag = 0
+
+    init(action: Selector?) {
+        self.action = action
     }
 }
 #endif
