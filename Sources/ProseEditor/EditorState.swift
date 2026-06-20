@@ -6,17 +6,20 @@ public struct EditorState: Sendable {
     public private(set) var selection: TextSelection
     public private(set) var lastTransaction: AppliedTransaction?
     public private(set) var typingMarks: [Mark]
+    public private(set) var history: EditorHistory
 
     public init(
         document: Document,
         selection: TextSelection? = nil,
         lastTransaction: AppliedTransaction? = nil,
-        typingMarks: [Mark] = []
+        typingMarks: [Mark] = [],
+        history: EditorHistory = EditorHistory()
     ) {
         self.document = document
         self.selection = selection ?? TextSelection(anchor: document.endTextPosition, head: document.endTextPosition)
         self.lastTransaction = lastTransaction
         self.typingMarks = typingMarks
+        self.history = history
     }
 
     public mutating func insertText(_ text: String) throws {
@@ -53,11 +56,51 @@ public struct EditorState: Sendable {
 
     /// The only mutation path: every edit is a Transaction of Steps, so the
     /// Changed Range, Origin, and (future) history all flow from one seam.
-    public mutating func dispatch(_ transaction: Transaction) throws {
+    public mutating func dispatch(_ transaction: Transaction, recordsHistory: Bool = true) throws {
+        let beforeDocument = document
+        let beforeSelection = selection
+        let undoSteps = try? Self.invertedSteps(for: transaction.steps, against: beforeDocument).reversed()
         let applied = try transaction.apply(to: document)
         document = applied.document
         selection = applied.selection
         lastTransaction = applied
+        if let undoSteps, recordsHistory, transaction.origin == .local, !transaction.steps.isEmpty {
+            history.recordUndo(EditorHistoryEntry(steps: Array(undoSteps), selection: beforeSelection))
+        }
+    }
+
+    public mutating func undo() throws -> Bool {
+        guard let entry = history.popUndo() else { return false }
+        let redoSteps = try Self.invertedSteps(for: entry.steps, against: document).reversed()
+        let selectionBeforeUndo = selection
+        try dispatch(
+            Transaction(steps: entry.steps, selection: entry.selection, origin: .history),
+            recordsHistory: false
+        )
+        history.pushRedo(EditorHistoryEntry(steps: Array(redoSteps), selection: selectionBeforeUndo))
+        return true
+    }
+
+    public mutating func redo() throws -> Bool {
+        guard let entry = history.popRedo() else { return false }
+        let undoSteps = try Self.invertedSteps(for: entry.steps, against: document).reversed()
+        let selectionBeforeRedo = selection
+        try dispatch(
+            Transaction(steps: entry.steps, selection: entry.selection, origin: .history),
+            recordsHistory: false
+        )
+        history.pushUndo(EditorHistoryEntry(steps: Array(undoSteps), selection: selectionBeforeRedo))
+        return true
+    }
+
+    private static func invertedSteps(for steps: [any Step], against document: Document) throws -> [any Step] {
+        var current = document
+        var inversions: [any Step] = []
+        for step in steps {
+            inversions.append(try step.inverted(in: current))
+            current = try step.apply(to: current).document
+        }
+        return inversions
     }
 
     // MARK: - Active state (toolbar queries)

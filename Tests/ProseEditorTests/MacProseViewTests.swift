@@ -62,6 +62,77 @@ final class MacProseViewTests: XCTestCase {
         XCTAssertNotNil(view.selectionLayer.blinkTimer)
     }
 
+    func testMacTextInputInsertsTextAndAdvancesCaret() throws {
+        let view = ProseView(document: Document(.doc([
+            .paragraph([.text("hello")]),
+        ])))
+        view.frame = CGRect(x: 0, y: 0, width: 320, height: 120)
+        view.layoutSubtreeIfNeeded()
+        let end = view.core.document.endTextPosition
+        view.core.setSelection(TextSelection(anchor: end, head: end))
+
+        view.insertText(" mac", replacementRange: NSRange(location: NSNotFound, length: 0))
+
+        XCTAssertEqual(view.document.plainText, "hello mac")
+        XCTAssertEqual(view.core.selection, TextSelection(anchor: end + 4, head: end + 4))
+        XCTAssertEqual(view.selectionLayer.selection, view.core.selection)
+    }
+
+    func testMacDoCommandRoutesDeleteAndReturnThroughEditorCommands() throws {
+        let view = ProseView(document: Document(.doc([
+            .paragraph([.text("hello")]),
+        ])))
+        view.frame = CGRect(x: 0, y: 0, width: 320, height: 120)
+        view.layoutSubtreeIfNeeded()
+        let end = view.core.document.endTextPosition
+        view.core.setSelection(TextSelection(anchor: end, head: end))
+
+        view.doCommand(by: #selector(NSResponder.deleteBackward(_:)))
+        XCTAssertEqual(view.document.plainText, "hell")
+        let afterDelete = view.core.selection.head
+
+        view.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+        XCTAssertEqual(view.document.blockCount, 2)
+        XCTAssertGreaterThan(view.core.selection.head, afterDelete)
+        XCTAssertEqual(view.selectionLayer.selection, view.core.selection)
+    }
+
+    func testMacMarkedTextCommitsThroughTextInputClient() throws {
+        let view = ProseView(document: Document(.doc([
+            .paragraph([.text("cafe")]),
+        ])))
+        view.frame = CGRect(x: 0, y: 0, width: 320, height: 120)
+        view.layoutSubtreeIfNeeded()
+        let end = view.core.document.endTextPosition
+        view.core.setSelection(TextSelection(anchor: end, head: end))
+
+        view.setMarkedText("e", selectedRange: NSRange(location: 1, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+        XCTAssertTrue(view.hasMarkedText())
+        XCTAssertEqual(view.document.plainText, "cafee")
+
+        view.insertText("é", replacementRange: view.markedRange())
+
+        XCTAssertFalse(view.hasMarkedText())
+        XCTAssertEqual(view.document.plainText, "cafeé")
+    }
+
+    func testMacTextInputEditsCanUndoAndRedoThroughCoreHistory() throws {
+        let view = ProseView(document: Document(.doc([
+            .paragraph([.text("hello")]),
+        ])))
+        view.frame = CGRect(x: 0, y: 0, width: 320, height: 120)
+        view.layoutSubtreeIfNeeded()
+        let end = view.core.document.endTextPosition
+        view.core.setSelection(TextSelection(anchor: end, head: end))
+        view.insertText("!", replacementRange: NSRange(location: NSNotFound, length: 0))
+
+        XCTAssertTrue(view.core.undo())
+        XCTAssertEqual(view.document.plainText, "hello")
+
+        XCTAssertTrue(view.core.redo())
+        XCTAssertEqual(view.document.plainText, "hello!")
+    }
+
     func testMacHighlightPaletteResolvesAcrossAppearances() throws {
         let palette = try XCTUnwrap(HighlightColor.color(for: "#ffd54f"))
         let light = try XCTUnwrap(NSAppearance(named: .aqua))

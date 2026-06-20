@@ -28,7 +28,8 @@ import ProseModel
             document: state.document,
             selection: selection,
             lastTransaction: state.lastTransaction,
-            typingMarks: state.typingMarks
+            typingMarks: state.typingMarks,
+            history: state.history
         )
     }
 
@@ -57,6 +58,37 @@ import ProseModel
 
     public func deleteBackward() throws {
         try state.deleteBackward()
+    }
+
+    public var canUndo: Bool { state.history.canUndo }
+    public var canRedo: Bool { state.history.canRedo }
+
+    @discardableResult
+    public func undo() -> Bool {
+        do {
+            let ran = try state.undo()
+            if ran {
+                relayout(changedRange: state.lastTransaction?.changedRange)
+            }
+            return ran
+        } catch {
+            assertionFailure("undo failed: \(error)")
+            return false
+        }
+    }
+
+    @discardableResult
+    public func redo() -> Bool {
+        do {
+            let ran = try state.redo()
+            if ran {
+                relayout(changedRange: state.lastTransaction?.changedRange)
+            }
+            return ran
+        } catch {
+            assertionFailure("redo failed: \(error)")
+            return false
+        }
     }
 
     @discardableResult
