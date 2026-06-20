@@ -168,7 +168,7 @@ import SwiftUI
 
     public override func selectAll(_ sender: Any?) {
         core.setSelection(ProseModel.TextSelection(anchor: core.document.startTextPosition, head: core.document.endTextPosition))
-        updateSelectionLayer()
+        updateSelectionViews()
     }
 
     @objc public func toggleBoldface(_ sender: Any?) {
@@ -210,7 +210,7 @@ import SwiftUI
         selectionAnchor = nil
         let position = core.closestPosition(to: point)
         core.setSelection(ProseModel.TextSelection(anchor: position, head: position))
-        updateSelectionLayer()
+        updateSelectionViews()
     }
 
     func beginSelection(atContentPoint point: CGPoint) {
@@ -222,7 +222,7 @@ import SwiftUI
         let position = core.closestPosition(to: point)
         selectionAnchor = position
         core.setSelection(ProseModel.TextSelection(anchor: position, head: position))
-        updateSelectionLayer()
+        updateSelectionViews()
     }
 
     func extendSelection(toContentPoint point: CGPoint) {
@@ -230,7 +230,7 @@ import SwiftUI
         let anchor = selectionAnchor ?? core.selection.anchor
         selectionAnchor = anchor
         core.setSelection(ProseModel.TextSelection(anchor: anchor, head: head))
-        updateSelectionLayer()
+        updateSelectionViews()
     }
 
     func selectWord(atContentPoint point: CGPoint) {
@@ -261,7 +261,7 @@ import SwiftUI
         let head = blockTextStart + upper
         selectionAnchor = anchor
         core.setSelection(ProseModel.TextSelection(anchor: anchor, head: head))
-        updateSelectionLayer()
+        updateSelectionViews()
     }
 
     func selectParagraph(atContentPoint point: CGPoint) {
@@ -275,7 +275,7 @@ import SwiftUI
         let head = anchor + count
         selectionAnchor = anchor
         core.setSelection(ProseModel.TextSelection(anchor: anchor, head: head))
-        updateSelectionLayer()
+        updateSelectionViews()
     }
 
     private enum TextDirection {
@@ -293,7 +293,7 @@ import SwiftUI
         let anchor = extending ? core.selection.anchor : clamped
         core.setSelection(ProseModel.TextSelection(anchor: anchor, head: clamped))
         selectionAnchor = extending ? anchor : nil
-        updateSelectionLayer()
+        updateSelectionViews()
     }
 
     private func paragraphBoundary(from position: Position, edge: ParagraphEdge) -> Position {
@@ -374,10 +374,10 @@ import SwiftUI
         canvasView.frame = editorContentView.bounds
         selectionLayer.frame = editorContentView.bounds
         canvasView.needsDisplay = true
-        updateSelectionLayer()
+        updateSelectionViews()
     }
 
-    private func updateSelectionLayer() {
+    private func updateSelectionViews() {
         selectionLayer.selection = core.selection
         selectionLayer.caretRect = core.caretRect(for: core.selection.head)
         canvasView.selectionRects = core.selectionRects(for: core.selection)
@@ -516,7 +516,7 @@ extension ProseView: @preconcurrency NSTextInputClient {
         let selectedStart = core.clamp(lower + selectedRange.location)
         let selectedEnd = core.clamp(selectedStart + selectedRange.length)
         core.setSelection(ProseModel.TextSelection(anchor: selectedStart, head: selectedEnd))
-        updateSelectionLayer()
+        updateSelectionViews()
     }
 
     public func unmarkText() {

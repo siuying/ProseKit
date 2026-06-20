@@ -40,11 +40,11 @@ import ProseModel
         guard let context = NSGraphicsContext.current?.cgContext else { return }
         PlatformColor.canvasBackground.setFill()
         dirtyRect.fill()
-        drawSelectionHighlight(dirtyRect)
+        drawSelectionHighlight(in: dirtyRect)
         drawCanvas(dirtyRect, in: context)
     }
 
-    private func drawSelectionHighlight(_ dirtyRect: NSRect) {
+    private func drawSelectionHighlight(in dirtyRect: NSRect) {
         guard drawsSelectionHighlight else { return }
         selectionHighlightColor.setFill()
         for rect in selectionRects where rect.intersects(dirtyRect) {
