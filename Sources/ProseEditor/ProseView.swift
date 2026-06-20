@@ -78,9 +78,15 @@ import UIKit
         guard automaticallyAdjustsForKeyboard,
               let endFrame = (notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?
             .cgRectValue else { return }
-        // Screen space → local space keeps the math right while scrolled;
-        // a dismissed keyboard sits below the view and overlaps nothing.
-        let local = convert(endFrame, from: nil)
+        // The keyboard frame is in its screen's coordinate space. Convert
+        // through this view's own screen (an intra-screen conversion) so the
+        // math stays right while scrolled and a dismissed keyboard — sitting
+        // below the view — overlaps nothing. convert(_:from: nil) instead lets
+        // UIKit reach for the keyboard's UIScreen, which on iPad multitasking
+        // (iPadOS 16.1+) is a different UIScreen instance than the window's and
+        // logs "Invalid UIScreen coordinate space conversion".
+        let local = window.map { $0.screen.coordinateSpace.convert(endFrame, to: self) }
+            ?? convert(endFrame, from: nil)
         let overlap = min(max(0, bounds.maxY - local.minY), bounds.height)
         contentInset.bottom = overlap
         verticalScrollIndicatorInsets.bottom = overlap
