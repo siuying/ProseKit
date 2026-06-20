@@ -7,7 +7,7 @@ No "Generated with" line.
 
 ### Issue tracker
 
-Issues live in GitHub Issues (repo: siuying/text-research). See `docs/agents/issue-tracker.md`.
+Issues live in GitHub Issues (repo: siuying/ProseKit). See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
