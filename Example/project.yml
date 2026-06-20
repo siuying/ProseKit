@@ -37,6 +37,34 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: com.siuying.ProseExampleUITests
         TEST_TARGET_NAME: ProseExample
+  ProseExampleMac:
+    type: application
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - ProseExampleMac
+    dependencies:
+      - package: Prose
+        product: ProseEditor
+      - package: Prose
+        product: ProseModel
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.siuying.ProseExampleMac
+  ProseExampleMacUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - ProseExampleMacUITests
+    dependencies:
+      - target: ProseExampleMac
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.siuying.ProseExampleMacUITests
+        TEST_TARGET_NAME: ProseExampleMac
 schemes:
   ProseExample:
     build:
@@ -49,3 +77,14 @@ schemes:
       config: Debug
       targets:
         - ProseExampleUITests
+  ProseExampleMac:
+    build:
+      targets:
+        ProseExampleMac: all
+        ProseExampleMacUITests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - ProseExampleMacUITests
