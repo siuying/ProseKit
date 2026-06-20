@@ -18,7 +18,6 @@ import SwiftUI
     let selectionLayer = MacSelectionLayerView()
     private let editorContentView = MacEditorContentView()
     private var markedTextPositionRange: Range<Position>?
-    private var markedTextSelectedRange = NSRange(location: NSNotFound, length: 0)
     private var selectionAnchor: Position?
 
     public init(document: Document, schema: Schema = .slice1) {
@@ -236,25 +235,30 @@ import SwiftUI
 
     func selectWord(atContentPoint point: CGPoint) {
         let nearestPosition = core.closestPosition(to: point)
-        let text = Array(core.document.plainText)
-        guard !text.isEmpty else {
+        // Scope the scan to the block under the caret: plainText joins blocks
+        // with no separator, so scanning the whole document would merge words
+        // across paragraph boundaries (and materialize the entire document).
+        guard let info = core.document.blockInfo(containing: nearestPosition),
+              let count = core.document.textCount(ofBlockAt: info.index), count > 0 else {
             placeCaret(atContentPoint: point)
             return
         }
-        var index = min(characterOffset(for: nearestPosition), text.count - 1)
-        if text[index].isWhitespace, index > 0 {
+        let blockText = Array(info.node.plainText)
+        let blockTextStart = info.start + 1
+        var index = max(0, min(count - 1, nearestPosition - blockTextStart))
+        if blockText[index].isWhitespace, index > 0 {
             index -= 1
         }
         var lower = index
         var upper = index + 1
-        while lower > 0, !text[lower - 1].isWhitespace {
+        while lower > 0, !blockText[lower - 1].isWhitespace {
             lower -= 1
         }
-        while upper < text.count, !text[upper].isWhitespace {
+        while upper < blockText.count, !blockText[upper].isWhitespace {
             upper += 1
         }
-        let anchor = position(forCharacterOffset: lower)
-        let head = position(forCharacterOffset: upper)
+        let anchor = blockTextStart + lower
+        let head = blockTextStart + upper
         selectionAnchor = anchor
         core.setSelection(ProseModel.TextSelection(anchor: anchor, head: head))
         updateSelectionLayer()
@@ -302,28 +306,42 @@ import SwiftUI
     }
 
     private func wordBoundary(from position: Position, direction: TextDirection) -> Position {
-        let text = Array(core.document.plainText)
-        guard !text.isEmpty else { return position }
+        // Scan within the current block (plainText has no block separators, so a
+        // whole-document scan would skip whole paragraphs as one "word"). When
+        // the caret is already at the block's edge, step into the adjacent block
+        // so word motion still crosses paragraph boundaries.
+        guard let info = core.document.blockInfo(containing: position),
+              let count = core.document.textCount(ofBlockAt: info.index) else {
+            return position
+        }
+        let blockText = Array(info.node.plainText)
+        let blockTextStart = info.start + 1
+        var local = max(0, min(count, position - blockTextStart))
+        let startLocal = local
         switch direction {
         case .forward:
-            var offset = min(characterOffset(for: position), text.count)
-            while offset < text.count, text[offset].isWhitespace {
-                offset += 1
+            while local < blockText.count, blockText[local].isWhitespace { local += 1 }
+            while local < blockText.count, !blockText[local].isWhitespace { local += 1 }
+            if local == startLocal {
+                guard info.index + 1 < core.document.blockCount,
+                      let nextStart = core.document.position(ofTextInBlockAt: info.index + 1) else {
+                    return position
+                }
+                return wordBoundary(from: nextStart, direction: .forward)
             }
-            while offset < text.count, !text[offset].isWhitespace {
-                offset += 1
-            }
-            return self.position(forCharacterOffset: offset)
         case .backward:
-            var offset = min(characterOffset(for: position), text.count)
-            while offset > 0, text[offset - 1].isWhitespace {
-                offset -= 1
+            while local > 0, blockText[local - 1].isWhitespace { local -= 1 }
+            while local > 0, !blockText[local - 1].isWhitespace { local -= 1 }
+            if local == startLocal {
+                guard info.index > 0,
+                      let previousStart = core.document.position(ofTextInBlockAt: info.index - 1),
+                      let previousCount = core.document.textCount(ofBlockAt: info.index - 1) else {
+                    return position
+                }
+                return wordBoundary(from: previousStart + previousCount, direction: .backward)
             }
-            while offset > 0, !text[offset - 1].isWhitespace {
-                offset -= 1
-            }
-            return self.position(forCharacterOffset: offset)
         }
+        return blockTextStart + local
     }
 
     private func deleteWord(direction: TextDirection) {
@@ -456,7 +474,17 @@ import SwiftUI
 
     private func clearMarkedText() {
         markedTextPositionRange = nil
-        markedTextSelectedRange = NSRange(location: NSNotFound, length: 0)
+    }
+
+    private func deleteMarkedSelection() {
+        do {
+            try core.insertText("")
+        } catch is StepError {
+            // Unsupported edit: leave the document untouched.
+        } catch {
+            assertionFailure("clearing marked text failed: \(error)")
+        }
+        relayout()
     }
 }
 
@@ -468,6 +496,12 @@ extension ProseView: @preconcurrency NSTextInputClient {
     public func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
         let text = Self.inputString(from: string)
         guard !text.isEmpty else {
+            // Clearing the composition must remove the provisional text already
+            // inserted, not just drop the range we were tracking.
+            if let markedTextPositionRange {
+                core.setSelection(ProseModel.TextSelection(anchor: markedTextPositionRange.lowerBound, head: markedTextPositionRange.upperBound))
+                deleteMarkedSelection()
+            }
             unmarkText()
             return
         }
@@ -479,7 +513,6 @@ extension ProseView: @preconcurrency NSTextInputClient {
         let lower = min(core.selection.anchor, core.selection.head)
         insertTextFromInput(text, replacementRange: NSRange(location: NSNotFound, length: 0))
         markedTextPositionRange = lower..<(lower + text.count)
-        markedTextSelectedRange = selectedRange
         let selectedStart = core.clamp(lower + selectedRange.location)
         let selectedEnd = core.clamp(selectedStart + selectedRange.length)
         core.setSelection(ProseModel.TextSelection(anchor: selectedStart, head: selectedEnd))
@@ -508,6 +541,7 @@ extension ProseView: @preconcurrency NSTextInputClient {
     }
 
     public func attributedSubstring(forProposedRange range: NSRange, actualRange: NSRangePointer?) -> NSAttributedString? {
+        guard range.location != NSNotFound else { return nil }
         let text = core.document.plainText
         let lower = max(0, min(range.location, text.count))
         let upper = max(lower, min(range.location + range.length, text.count))
@@ -523,7 +557,7 @@ extension ProseView: @preconcurrency NSTextInputClient {
 
     public func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect {
         actualRange?.pointee = range
-        let position = position(forCharacterOffset: range.location)
+        let position = position(forCharacterOffset: range.location == NSNotFound ? core.document.totalTextCount : range.location)
         let rect = core.caretRect(for: position)
         let windowRect = editorContentView.convert(rect, to: nil)
         return window?.convertToScreen(windowRect) ?? windowRect
@@ -642,29 +676,45 @@ public enum MacProseFormatMenu {
     }
 
     private static func menuItem(title: String, binding: EditorKeyBinding, action: Selector) -> NSMenuItem {
-        let item = NSMenuItem(title: title, action: action, keyEquivalent: keyEquivalent(for: binding.key))
-        item.keyEquivalentModifierMask = eventModifierFlags(for: binding.modifiers)
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: binding.key.keyEquivalent)
+        item.keyEquivalentModifierMask = NSEvent.ModifierFlags(binding.modifiers)
         return item
     }
+}
 
-    private static func keyEquivalent(for key: EditorKeyBinding.Key) -> String {
-        switch key {
-        case let .character(character):
-            return character
-        case .tab:
-            return "\t"
-        }
+/// The standard Edit menu (Undo/Redo/Cut/Copy/Paste/Select All) wired to
+/// `ProseView`'s responder actions, so host apps install one menu instead of
+/// re-deriving these shortcuts.
+public enum MacProseEditMenu {
+    public static func makeMenu() -> NSMenu {
+        let menu = NSMenu(title: "Edit")
+        menu.addItem(item("Undo", #selector(ProseView.undo(_:)), "z", .command))
+        menu.addItem(item("Redo", #selector(ProseView.redo(_:)), "z", [.command, .shift]))
+        menu.addItem(.separator())
+        menu.addItem(item("Cut", #selector(ProseView.cut(_:)), "x", .command))
+        menu.addItem(item("Copy", #selector(ProseView.copy(_:)), "c", .command))
+        menu.addItem(item("Paste", #selector(ProseView.paste(_:)), "v", .command))
+        menu.addItem(.separator())
+        menu.addItem(item("Select All", #selector(ProseView.selectAll(_:)), "a", .command))
+        return menu
     }
 
-    private static func eventModifierFlags(for modifiers: EditorKeyModifiers) -> NSEvent.ModifierFlags {
-        var flags: NSEvent.ModifierFlags = []
+    private static func item(_ title: String, _ action: Selector, _ key: String, _ modifiers: NSEvent.ModifierFlags) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+        item.keyEquivalentModifierMask = modifiers
+        return item
+    }
+}
+
+extension NSEvent.ModifierFlags {
+    init(_ modifiers: EditorKeyModifiers) {
+        self = []
         if modifiers.contains(.command) {
-            flags.insert(.command)
+            insert(.command)
         }
         if modifiers.contains(.shift) {
-            flags.insert(.shift)
+            insert(.shift)
         }
-        return flags
     }
 }
 #endif

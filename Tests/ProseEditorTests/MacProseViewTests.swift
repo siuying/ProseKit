@@ -390,6 +390,85 @@ final class MacProseViewTests: XCTestCase {
         XCTAssertEqual(view.core.selection, TextSelection(anchor: view.document.startTextPosition, head: view.document.endTextPosition))
     }
 
+    func testMacDoubleClickSelectsWordWithoutCrossingBlocks() throws {
+        let view = ProseView(document: Document(.doc([
+            .paragraph([.text("hello")]),
+            .paragraph([.text("world")]),
+        ])))
+        view.frame = CGRect(x: 0, y: 0, width: 320, height: 120)
+        view.layoutSubtreeIfNeeded()
+        let firstTextStart = try XCTUnwrap(view.document.position(ofTextInBlockAt: 0))
+        let point = view.core.caretRect(for: firstTextStart + 1).offsetBy(dx: 2, dy: 0).origin
+
+        view.selectWord(atContentPoint: point)
+
+        XCTAssertEqual(
+            try view.document.text(from: view.core.selection.anchor, to: view.core.selection.head),
+            "hello"
+        )
+    }
+
+    func testMacWordMotionTreatsBlockBoundaryAsAWordBreak() throws {
+        let view = ProseView(document: Document(.doc([
+            .paragraph([.text("hello")]),
+            .paragraph([.text("world")]),
+        ])))
+        view.frame = CGRect(x: 0, y: 0, width: 320, height: 120)
+        view.layoutSubtreeIfNeeded()
+        let firstStart = try XCTUnwrap(view.document.position(ofTextInBlockAt: 0))
+        view.core.setSelection(TextSelection(anchor: firstStart, head: firstStart))
+
+        view.doCommand(by: #selector(NSResponder.moveWordRight(_:)))
+        XCTAssertEqual(view.core.selection, TextSelection(anchor: firstStart + 5, head: firstStart + 5))
+
+        view.doCommand(by: #selector(NSResponder.moveWordRight(_:)))
+        let secondStart = try XCTUnwrap(view.document.position(ofTextInBlockAt: 1))
+        XCTAssertEqual(view.core.selection, TextSelection(anchor: secondStart + 5, head: secondStart + 5))
+    }
+
+    func testMacClearingMarkedTextRemovesProvisionalCharacters() throws {
+        let view = ProseView(document: Document(.doc([
+            .paragraph([.text("cafe")]),
+        ])))
+        view.frame = CGRect(x: 0, y: 0, width: 320, height: 120)
+        view.layoutSubtreeIfNeeded()
+        let end = view.core.document.endTextPosition
+        view.core.setSelection(TextSelection(anchor: end, head: end))
+
+        view.setMarkedText("n", selectedRange: NSRange(location: 1, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+        XCTAssertTrue(view.hasMarkedText())
+        XCTAssertEqual(view.document.plainText, "cafen")
+
+        view.setMarkedText("", selectedRange: NSRange(location: 0, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+        XCTAssertFalse(view.hasMarkedText())
+        XCTAssertEqual(view.document.plainText, "cafe")
+    }
+
+    func testMacAttributedSubstringReturnsNilForNotFoundRange() throws {
+        let view = ProseView(document: Document(.doc([
+            .paragraph([.text("hello")]),
+        ])))
+        view.frame = CGRect(x: 0, y: 0, width: 320, height: 120)
+        view.layoutSubtreeIfNeeded()
+
+        XCTAssertNil(view.attributedSubstring(forProposedRange: NSRange(location: NSNotFound, length: 0), actualRange: nil))
+    }
+
+    func testMacEditMenuFactoryWiresStandardActions() throws {
+        let menu = MacProseEditMenu.makeMenu()
+
+        let undo = try XCTUnwrap(menu.item(withTitle: "Undo"))
+        XCTAssertEqual(undo.action, #selector(ProseView.undo(_:)))
+        XCTAssertEqual(undo.keyEquivalent, "z")
+        XCTAssertTrue(undo.keyEquivalentModifierMask.contains(.command))
+
+        let redo = try XCTUnwrap(menu.item(withTitle: "Redo"))
+        XCTAssertTrue(redo.keyEquivalentModifierMask.contains(.shift))
+
+        XCTAssertEqual(try XCTUnwrap(menu.item(withTitle: "Paste")).action, #selector(ProseView.paste(_:)))
+        XCTAssertEqual(try XCTUnwrap(menu.item(withTitle: "Select All")).action, #selector(ProseView.selectAll(_:)))
+    }
+
     func testMacHighlightPaletteResolvesAcrossAppearances() throws {
         let palette = try XCTUnwrap(HighlightColor.color(for: "#ffd54f"))
         let light = try XCTUnwrap(NSAppearance(named: .aqua))

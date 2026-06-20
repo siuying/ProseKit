@@ -15,6 +15,17 @@ public struct EditorKeyBinding: Equatable, Sendable {
     public enum Key: Equatable, Sendable {
         case character(String)
         case tab
+
+        /// The platform key-equivalent string shared by the AppKit menus and
+        /// the UIKit key commands, so every binding maps its key one way.
+        public var keyEquivalent: String {
+            switch self {
+            case let .character(character):
+                return character
+            case .tab:
+                return "\t"
+            }
+        }
     }
 
     public enum Action: Equatable, Sendable {
