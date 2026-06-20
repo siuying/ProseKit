@@ -24,4 +24,22 @@ final class EditorCoreTests: XCTestCase {
         XCTAssertEqual(after.frame.width, 320)
         XCTAssertGreaterThan(core.caretRect(for: core.selection.head).height, 0)
     }
+
+    func testCoreExposesSharedEditorKeyBindings() throws {
+        let bindings = EditorCore.sharedKeyBindings
+
+        XCTAssertEqual(bindings.map(\.key), [.character("b"), .character("i"), .tab, .tab])
+        XCTAssertEqual(bindings.map(\.modifiers), [.command, .command, [], .shift])
+        XCTAssertEqual(bindings.map(\.action), [.toggleBold, .toggleItalic, .sinkListItem, .liftListItem])
+
+        let document = Document(.doc([
+            .paragraph([.text("hello")]),
+        ]))
+        let core = EditorCore(document: document)
+        let start = try XCTUnwrap(core.document.position(ofTextInBlockAt: 0))
+        core.setSelection(TextSelection(anchor: start, head: start + 5))
+
+        XCTAssertTrue(core.runKeyBindingAction(.toggleBold))
+        XCTAssertEqual(core.document.root.content[0].content[0].marks, [.bold])
+    }
 }

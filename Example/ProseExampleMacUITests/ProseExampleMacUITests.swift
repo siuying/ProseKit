@@ -60,4 +60,29 @@ final class ProseExampleMacUITests: XCTestCase {
         XCTAssertTrue(value.contains("CLIP"))
         XCTAssertFalse(value.contains("CLIPP"))
     }
+
+    @MainActor
+    func testMacEditorFormatShortcutAndTabBinding() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        let editor = app.textViews["Prose editor"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 10))
+        editor.click()
+        editor.typeKey(.rightArrow, modifierFlags: [.command])
+        editor.typeText("BOLD")
+        editor.typeKey(.leftArrow, modifierFlags: [.shift])
+        editor.typeKey("b", modifierFlags: [.command])
+
+        var value = try XCTUnwrap(editor.value as? String)
+        XCTAssertTrue(value.contains("BOLD"))
+        XCTAssertFalse(value.contains("BOLDb"))
+
+        let listPoint = editor.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.88))
+        listPoint.click()
+        editor.typeKey(.tab, modifierFlags: [])
+
+        value = try XCTUnwrap(editor.value as? String)
+        XCTAssertFalse(value.contains("\t"))
+    }
 }
