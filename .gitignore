@@ -4,3 +4,4 @@ DerivedData/
 build/
 Example/build/
 xcuserdata/
+node_modules/
