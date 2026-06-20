@@ -584,12 +584,13 @@ import UIKit
     // MARK: - Hardware keyboard
 
     public override var keyCommands: [UIKeyCommand]? {
-        let commands = [
-            UIKeyCommand(input: "b", modifierFlags: .command, action: #selector(toggleBoldFromKeyCommand)),
-            UIKeyCommand(input: "i", modifierFlags: .command, action: #selector(toggleItalicFromKeyCommand)),
-            UIKeyCommand(input: "\t", modifierFlags: [], action: #selector(sinkListItemFromKeyCommand)),
-            UIKeyCommand(input: "\t", modifierFlags: .shift, action: #selector(liftListItemFromKeyCommand)),
-        ]
+        let commands = EditorCore.sharedKeyBindings.map { binding in
+            UIKeyCommand(
+                input: Self.uiInput(for: binding.key),
+                modifierFlags: Self.uiModifierFlags(for: binding.modifiers),
+                action: Self.uiAction(for: binding.action)
+            )
+        }
         // Without priority, the system routes ⌘B/⌘I to the standard edit
         // actions instead of these commands.
         for command in commands {
@@ -599,27 +600,64 @@ import UIKit
     }
 
     public override func toggleBoldface(_ sender: Any?) {
-        toggleMark(.bold)
+        runKeyBindingAction(.toggleBold)
     }
 
     public override func toggleItalics(_ sender: Any?) {
-        toggleMark(.italic)
+        runKeyBindingAction(.toggleItalic)
     }
 
     @objc private func toggleBoldFromKeyCommand() {
-        toggleMark(.bold)
+        runKeyBindingAction(.toggleBold)
     }
 
     @objc private func toggleItalicFromKeyCommand() {
-        toggleMark(.italic)
+        runKeyBindingAction(.toggleItalic)
     }
 
     @objc private func sinkListItemFromKeyCommand() {
-        sinkListItem()
+        runKeyBindingAction(.sinkListItem)
     }
 
     @objc private func liftListItemFromKeyCommand() {
-        liftListItem()
+        runKeyBindingAction(.liftListItem)
+    }
+
+    private func runKeyBindingAction(_ action: EditorKeyBinding.Action) {
+        runCommand(action.command)
+    }
+
+    private static func uiInput(for key: EditorKeyBinding.Key) -> String {
+        switch key {
+        case let .character(character):
+            return character
+        case .tab:
+            return "\t"
+        }
+    }
+
+    private static func uiModifierFlags(for modifiers: EditorKeyModifiers) -> UIKeyModifierFlags {
+        var flags: UIKeyModifierFlags = []
+        if modifiers.contains(.command) {
+            flags.insert(.command)
+        }
+        if modifiers.contains(.shift) {
+            flags.insert(.shift)
+        }
+        return flags
+    }
+
+    private static func uiAction(for action: EditorKeyBinding.Action) -> Selector {
+        switch action {
+        case .toggleBold:
+            return #selector(toggleBoldFromKeyCommand)
+        case .toggleItalic:
+            return #selector(toggleItalicFromKeyCommand)
+        case .sinkListItem:
+            return #selector(sinkListItemFromKeyCommand)
+        case .liftListItem:
+            return #selector(liftListItemFromKeyCommand)
+        }
     }
 
     public override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {

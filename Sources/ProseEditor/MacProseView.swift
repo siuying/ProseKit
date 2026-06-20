@@ -85,6 +85,10 @@ import SwiftUI
             deleteBackwardFromInput()
         case #selector(NSResponder.insertNewline(_:)):
             runInputCommand(Commands.splitBlock())
+        case #selector(NSResponder.insertTab(_:)):
+            runKeyBinding(key: .tab, modifiers: [])
+        case #selector(NSResponder.insertBacktab(_:)):
+            runKeyBinding(key: .tab, modifiers: .shift)
         case #selector(NSResponder.moveLeft(_:)):
             moveCaret(to: core.position(before: core.selection.head), extending: false)
         case #selector(NSResponder.moveRight(_:)):
@@ -153,12 +157,30 @@ import SwiftUI
         insertTextFromInput(text, replacementRange: NSRange(location: NSNotFound, length: 0))
     }
 
+    @objc public func toggleBoldface(_ sender: Any?) {
+        runKeyBinding(key: .character("b"), modifiers: .command)
+    }
+
+    @objc public func toggleItalics(_ sender: Any?) {
+        runKeyBinding(key: .character("i"), modifiers: .command)
+    }
+
     public func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
         canPerformEditAction(for: item.action)
     }
 
     public func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
-        canPerformEditAction(for: menuItem.action)
+        switch menuItem.action {
+        case #selector(toggleBoldface(_:)):
+            menuItem.state = core.state.isActive(.bold) ? .on : .off
+            return true
+        case #selector(toggleItalics(_:)):
+            menuItem.state = core.state.isActive(.italic) ? .on : .off
+            return true
+        default:
+            break
+        }
+        return canPerformEditAction(for: menuItem.action)
     }
 
     func placeCaret(atContentPoint point: CGPoint) {
@@ -400,6 +422,12 @@ import SwiftUI
         relayout()
     }
 
+    private func runKeyBinding(key: EditorKeyBinding.Key, modifiers: EditorKeyModifiers) {
+        guard let binding = core.keyBinding(for: key, modifiers: modifiers) else { return }
+        _ = core.runKeyBindingAction(binding.action)
+        relayout()
+    }
+
     private func selectReplacementRange(_ replacementRange: NSRange) {
         guard replacementRange.location != NSNotFound else { return }
         core.setSelection(textSelection(forCharacterRange: replacementRange))
@@ -568,6 +596,54 @@ public struct MacProseEditorView: NSViewRepresentable {
 
     public func updateNSView(_ nsView: ProseView, context: Context) {
         nsView.document = document
+    }
+}
+
+public enum MacProseFormatMenu {
+    public static func makeMenu() -> NSMenu {
+        let menu = NSMenu(title: "Format")
+        for binding in EditorCore.sharedKeyBindings {
+            guard let item = menuItem(for: binding) else { continue }
+            menu.addItem(item)
+        }
+        return menu
+    }
+
+    private static func menuItem(for binding: EditorKeyBinding) -> NSMenuItem? {
+        switch binding.action {
+        case .toggleBold:
+            return menuItem(title: "Bold", binding: binding, action: #selector(ProseView.toggleBoldface(_:)))
+        case .toggleItalic:
+            return menuItem(title: "Italic", binding: binding, action: #selector(ProseView.toggleItalics(_:)))
+        case .sinkListItem, .liftListItem:
+            return nil
+        }
+    }
+
+    private static func menuItem(title: String, binding: EditorKeyBinding, action: Selector) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: keyEquivalent(for: binding.key))
+        item.keyEquivalentModifierMask = eventModifierFlags(for: binding.modifiers)
+        return item
+    }
+
+    private static func keyEquivalent(for key: EditorKeyBinding.Key) -> String {
+        switch key {
+        case let .character(character):
+            return character
+        case .tab:
+            return "\t"
+        }
+    }
+
+    private static func eventModifierFlags(for modifiers: EditorKeyModifiers) -> NSEvent.ModifierFlags {
+        var flags: NSEvent.ModifierFlags = []
+        if modifiers.contains(.command) {
+            flags.insert(.command)
+        }
+        if modifiers.contains(.shift) {
+            flags.insert(.shift)
+        }
+        return flags
     }
 }
 #endif

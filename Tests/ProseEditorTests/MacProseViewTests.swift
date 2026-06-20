@@ -241,6 +241,30 @@ final class MacProseViewTests: XCTestCase {
         XCTAssertEqual(view.document.plainText, " ")
     }
 
+    func testMacDoCommandRunsSharedTabBindingsForListItems() throws {
+        let view = ProseView(document: Document(.doc([
+            .bulletList([
+                .listItem([.paragraph([.text("ab")])]),
+                .listItem([.paragraph([.text("cd")])]),
+            ]),
+        ])))
+        view.frame = CGRect(x: 0, y: 0, width: 320, height: 120)
+        view.layoutSubtreeIfNeeded()
+        view.core.setSelection(TextSelection(anchor: 10, head: 10))
+
+        view.doCommand(by: #selector(NSResponder.insertTab(_:)))
+
+        var firstItem = view.document.root.content[0].content[0]
+        XCTAssertEqual(firstItem.content.map(\.type), ["paragraph", "bulletList"])
+
+        view.doCommand(by: #selector(NSResponder.insertBacktab(_:)))
+
+        firstItem = view.document.root.content[0].content[0]
+        XCTAssertEqual(firstItem.content.map(\.type), ["paragraph"])
+        XCTAssertEqual(view.document.root.content[0].content.map(\.plainText), ["ab", "cd"])
+        XCTAssertEqual(view.selectionLayer.selection, view.core.selection)
+    }
+
     func testMacCopyPutsSelectedPlainTextOnPasteboard() throws {
         let view = ProseView(document: Document(.doc([
             .paragraph([.text("hello world")]),
@@ -308,6 +332,34 @@ final class MacProseViewTests: XCTestCase {
         view.core.setSelection(TextSelection(anchor: start, head: start + 5))
         XCTAssertTrue(view.validateMenuItem(NSMenuItem(title: "Copy", action: #selector(ProseView.copy(_:)), keyEquivalent: "")))
         XCTAssertTrue(view.validateUserInterfaceItem(TestValidatedItem(action: #selector(ProseView.cut(_:)))))
+    }
+
+    func testMacFormatMenuUsesSharedBindingsAndReflectsActiveMarks() throws {
+        let menu = MacProseFormatMenu.makeMenu()
+        let boldItem = try XCTUnwrap(menu.item(withTitle: "Bold"))
+        let italicItem = try XCTUnwrap(menu.item(withTitle: "Italic"))
+
+        XCTAssertEqual(boldItem.keyEquivalent, "b")
+        XCTAssertTrue(boldItem.keyEquivalentModifierMask.contains(.command))
+        XCTAssertEqual(boldItem.action, #selector(ProseView.toggleBoldface(_:)))
+        XCTAssertEqual(italicItem.keyEquivalent, "i")
+        XCTAssertTrue(italicItem.keyEquivalentModifierMask.contains(.command))
+        XCTAssertEqual(italicItem.action, #selector(ProseView.toggleItalics(_:)))
+
+        let view = ProseView(document: Document(.doc([
+            .paragraph([.text("hello world")]),
+        ])))
+        let start = try XCTUnwrap(view.document.position(ofTextInBlockAt: 0))
+        view.core.setSelection(TextSelection(anchor: start, head: start + 5))
+
+        XCTAssertTrue(view.validateMenuItem(boldItem))
+        XCTAssertEqual(boldItem.state, .off)
+
+        view.toggleBoldface(nil)
+
+        XCTAssertEqual(view.document.root.content[0].content[0].marks, [.bold])
+        XCTAssertTrue(view.validateMenuItem(boldItem))
+        XCTAssertEqual(boldItem.state, .on)
     }
 
     func testMacHighlightPaletteResolvesAcrossAppearances() throws {
