@@ -35,27 +35,6 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-private enum MacProseEditMenu {
-    static func makeMenu() -> NSMenu {
-        let menu = NSMenu(title: "Edit")
-        menu.addItem(item("Undo", action: #selector(ProseView.undo(_:)), key: "z", modifiers: .command))
-        menu.addItem(item("Redo", action: #selector(ProseView.redo(_:)), key: "z", modifiers: [.command, .shift]))
-        menu.addItem(.separator())
-        menu.addItem(item("Cut", action: #selector(ProseView.cut(_:)), key: "x", modifiers: .command))
-        menu.addItem(item("Copy", action: #selector(ProseView.copy(_:)), key: "c", modifiers: .command))
-        menu.addItem(item("Paste", action: #selector(ProseView.paste(_:)), key: "v", modifiers: .command))
-        menu.addItem(.separator())
-        menu.addItem(item("Select All", action: #selector(ProseView.selectAll(_:)), key: "a", modifiers: .command))
-        return menu
-    }
-
-    private static func item(_ title: String, action: Selector, key: String, modifiers: NSEvent.ModifierFlags) -> NSMenuItem {
-        let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
-        item.keyEquivalentModifierMask = modifiers
-        return item
-    }
-}
-
 private extension Document {
     static let macDemo = Document(.doc([
         .heading(level: 1, [.text("ProseExample macOS")]),

@@ -586,7 +586,7 @@ import UIKit
     public override var keyCommands: [UIKeyCommand]? {
         let commands = EditorCore.sharedKeyBindings.map { binding in
             UIKeyCommand(
-                input: Self.uiInput(for: binding.key),
+                input: binding.key.keyEquivalent,
                 modifierFlags: Self.uiModifierFlags(for: binding.modifiers),
                 action: Self.uiAction(for: binding.action)
             )
@@ -625,15 +625,6 @@ import UIKit
 
     private func runKeyBindingAction(_ action: EditorKeyBinding.Action) {
         runCommand(action.command)
-    }
-
-    private static func uiInput(for key: EditorKeyBinding.Key) -> String {
-        switch key {
-        case let .character(character):
-            return character
-        case .tab:
-            return "\t"
-        }
     }
 
     private static func uiModifierFlags(for modifiers: EditorKeyModifiers) -> UIKeyModifierFlags {

@@ -28,11 +28,14 @@ public struct EditorState: Sendable {
         let head = from + text.count
         // Pending typing Marks ride on the Step itself; they only apply at a
         // collapsed caret (replacing a selection types plain).
-        try dispatch(Transaction(
-            steps: [ReplaceStep(from: from, to: to, insertText: text, insertMarks: from == to ? typingMarks : [])],
-            selection: TextSelection(anchor: head, head: head),
-            origin: .local
-        ))
+        try dispatch(
+            Transaction(
+                steps: [ReplaceStep(from: from, to: to, insertText: text, insertMarks: from == to ? typingMarks : [])],
+                selection: TextSelection(anchor: head, head: head),
+                origin: .local
+            ),
+            coalescing: from == to && !text.isEmpty ? .typing : .none
+        )
     }
 
     public mutating func deleteBackward() throws {
@@ -47,25 +50,45 @@ public struct EditorState: Sendable {
         guard let textStart = document.blockTextStart(at: selection.head),
               selection.head > textStart else { return }
         let head = selection.head - 1
-        try dispatch(Transaction(
-            steps: [ReplaceStep(from: head, to: selection.head, insertText: "")],
-            selection: TextSelection(anchor: head, head: head),
-            origin: .local
-        ))
+        try dispatch(
+            Transaction(
+                steps: [ReplaceStep(from: head, to: selection.head, insertText: "")],
+                selection: TextSelection(anchor: head, head: head),
+                origin: .local
+            ),
+            coalescing: .deleting
+        )
     }
 
     /// The only mutation path: every edit is a Transaction of Steps, so the
-    /// Changed Range, Origin, and (future) history all flow from one seam.
+    /// Changed Range, Origin, and history all flow from one seam.
     public mutating func dispatch(_ transaction: Transaction, recordsHistory: Bool = true) throws {
+        try dispatch(transaction, recordsHistory: recordsHistory, coalescing: .none)
+    }
+
+    mutating func dispatch(
+        _ transaction: Transaction,
+        recordsHistory: Bool = true,
+        coalescing: HistoryCoalescing
+    ) throws {
         let beforeDocument = document
         let beforeSelection = selection
-        let undoSteps = try? Self.invertedSteps(for: transaction.steps, against: beforeDocument).reversed()
+        let shouldRecord = recordsHistory && transaction.origin == .local && !transaction.steps.isEmpty
         let applied = try transaction.apply(to: document)
         document = applied.document
         selection = applied.selection
         lastTransaction = applied
-        if let undoSteps, recordsHistory, transaction.origin == .local, !transaction.steps.isEmpty {
-            history.recordUndo(EditorHistoryEntry(steps: Array(undoSteps), selection: beforeSelection))
+        guard shouldRecord else { return }
+        // Invert against the pre-edit document the steps were valid against.
+        if let inverted = try? Self.invertedSteps(for: transaction.steps, against: beforeDocument) {
+            history.record(
+                EditorHistoryEntry(steps: Array(inverted.reversed()), selection: beforeSelection),
+                coalescing: coalescing,
+                caretBefore: beforeSelection.head,
+                caretAfter: applied.selection.head
+            )
+        } else {
+            history.invalidateRedo()
         }
     }
 
@@ -78,6 +101,7 @@ public struct EditorState: Sendable {
             recordsHistory: false
         )
         history.pushRedo(EditorHistoryEntry(steps: Array(redoSteps), selection: selectionBeforeUndo))
+        history.breakCoalescing()
         return true
     }
 
@@ -90,6 +114,7 @@ public struct EditorState: Sendable {
             recordsHistory: false
         )
         history.pushUndo(EditorHistoryEntry(steps: Array(undoSteps), selection: selectionBeforeRedo))
+        history.breakCoalescing()
         return true
     }
 

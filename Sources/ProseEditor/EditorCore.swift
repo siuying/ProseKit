@@ -32,12 +32,16 @@ public enum EditorEditAction {
     public var lastTransaction: AppliedTransaction? { state.lastTransaction }
 
     public func setSelection(_ selection: TextSelection) {
+        // Moving the caret ends any in-progress typing/deleting run so the next
+        // edit starts a fresh undo step.
+        var history = state.history
+        history.breakCoalescing()
         state = EditorState(
             document: state.document,
             selection: selection,
             lastTransaction: state.lastTransaction,
             typingMarks: state.typingMarks,
-            history: state.history
+            history: history
         )
     }
 
