@@ -1,6 +1,14 @@
 import CoreGraphics
 import ProseModel
 
+public enum EditorEditAction {
+    case copy
+    case cut
+    case paste
+    case select
+    case selectAll
+}
+
 @MainActor public final class EditorCore {
     public private(set) var state: EditorState
     public private(set) var layoutStore: IncrementalLayoutStore
@@ -62,6 +70,17 @@ import ProseModel
 
     public var canUndo: Bool { state.history.canUndo }
     public var canRedo: Bool { state.history.canRedo }
+
+    public func canPerformEditAction(_ action: EditorEditAction, pasteboardHasStrings: Bool) -> Bool {
+        switch action {
+        case .copy, .cut:
+            return !state.selection.isCollapsed
+        case .paste:
+            return pasteboardHasStrings
+        case .select, .selectAll:
+            return state.document.totalTextCount > 0
+        }
+    }
 
     @discardableResult
     public func undo() -> Bool {
