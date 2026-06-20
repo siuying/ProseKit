@@ -7,7 +7,7 @@ No "Generated with" line.
 
 ### Issue tracker
 
-Issues live as local markdown files under `.scratch/<feature>/`. See `docs/agents/issue-tracker.md`.
+Issues live in GitHub Issues (repo: siuying/text-research). See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
@@ -15,4 +15,4 @@ Uses default label vocabulary (needs-triage, needs-info, ready-for-agent, ready-
 
 ### Domain docs
 
-Multi-context layout — `CONTEXT-MAP.md` at the root points to per-package `CONTEXT.md` files. See `docs/agents/domain.md`.
+Single-context layout — one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
