@@ -102,6 +102,8 @@ The unit of configuration and extensibility (Tiptap-style). One Extension may
 contribute Node/Mark specs to the **Schema**, **Commands**, keymap entries, input
 rules, and **Render Hooks**. The editor is configured by an ordered list of
 Extensions; built-in features are authored through the same API as third-party ones.
+_Not yet built_: the Extension type itself; today Schema rules, Commands, and
+keymap entries are wired directly, not contributed through an Extension.
 _Avoid_: plugin (reserved for a future PM-style runtime plugin), module, feature
 
 **Render Hook**:
@@ -149,3 +151,14 @@ The Canvas holds no document or geometry authority — it is repainted from the
 layout tree and answers no questions; caret, selection, and hit-testing geometry
 are answered in content coordinates, never Canvas coordinates.
 _Avoid_: content view, backing store, layer
+
+**Selection Layer**:
+The chrome that renders the **Selection** — the blinking caret and the
+range highlight — sitting above the **Canvas**, never inside it. One role,
+two platform realizations: on iOS it *is* the system (`UITextInteraction`
+draws caret, handles, loupe, menu); on macOS it is an editor-owned overlay
+that draws caret and highlight itself, since AppKit's text-input protocol
+draws no chrome. Reads geometry in content coordinates like everything else;
+the **Canvas** stays authority-free on both platforms.
+_Avoid_: caret view, cursor layer, selection view (it is the whole chrome,
+not one piece)
