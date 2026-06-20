@@ -133,6 +133,58 @@ final class MacProseViewTests: XCTestCase {
         XCTAssertEqual(view.document.plainText, "hello!")
     }
 
+    func testMacMouseDragSelectsRangeThroughSharedGeometry() throws {
+        let view = ProseView(document: Document(.doc([
+            .paragraph([.text("hello mac")]),
+        ])))
+        view.frame = CGRect(x: 0, y: 0, width: 320, height: 120)
+        view.layoutSubtreeIfNeeded()
+        let start = CGPoint(x: 40, y: 18)
+        let end = CGPoint(x: 92, y: 18)
+        let anchor = view.core.closestPosition(to: start)
+        let head = view.core.closestPosition(to: end)
+
+        view.beginSelection(atContentPoint: start)
+        view.extendSelection(toContentPoint: end)
+
+        XCTAssertEqual(view.core.selection, TextSelection(anchor: anchor, head: head))
+        XCTAssertEqual(view.selectionLayer.selectionRects, view.core.selectionRects(for: view.core.selection))
+        XCTAssertTrue(view.selectionLayer.drawsSelectionHighlight)
+        XCTAssertFalse(view.selectionLayer.drawsCaret)
+    }
+
+    func testMacDoubleAndTripleClickSelectWordAndParagraph() throws {
+        let view = ProseView(document: Document(.doc([
+            .paragraph([.text("hello mac")]),
+            .paragraph([.text("next")]),
+        ])))
+        view.frame = CGRect(x: 0, y: 0, width: 320, height: 120)
+        view.layoutSubtreeIfNeeded()
+        let firstTextStart = try XCTUnwrap(view.document.position(ofTextInBlockAt: 0))
+        let wordPoint = view.core.caretRect(for: firstTextStart + 1).offsetBy(dx: 2, dy: 0).origin
+
+        view.selectWord(atContentPoint: wordPoint)
+        XCTAssertEqual(
+            try view.document.text(from: view.core.selection.anchor, to: view.core.selection.head),
+            "hello"
+        )
+
+        view.selectParagraph(atContentPoint: wordPoint)
+        XCTAssertEqual(view.core.selection, TextSelection(anchor: firstTextStart, head: firstTextStart + 9))
+    }
+
+    func testMacSelectionHighlightUsesActiveAndInactiveWindowColors() throws {
+        let layer = MacSelectionLayerView()
+        layer.selectionRects = [CGRect(x: 1, y: 2, width: 3, height: 4)]
+
+        layer.setWindowIsKey(true)
+        let active = layer.selectionHighlightColor
+        layer.setWindowIsKey(false)
+
+        XCTAssertTrue(layer.drawsSelectionHighlight)
+        XCTAssertNotEqual(active, layer.selectionHighlightColor)
+    }
+
     func testMacHighlightPaletteResolvesAcrossAppearances() throws {
         let palette = try XCTUnwrap(HighlightColor.color(for: "#ffd54f"))
         let light = try XCTUnwrap(NSAppearance(named: .aqua))

@@ -12,6 +12,12 @@ import ProseModel
     var caretRect = CGRect.zero {
         didSet { needsDisplay = true }
     }
+    var selectionRects: [CGRect] = [] {
+        didSet { needsDisplay = true }
+    }
+    private var windowIsKey = true {
+        didSet { needsDisplay = true }
+    }
     private var editorIsFirstResponder = false {
         didSet {
             restartBlinking()
@@ -25,6 +31,14 @@ import ProseModel
 
     var drawsCaret: Bool {
         editorIsFirstResponder && caretIsVisible && selection.isCollapsed && !caretRect.isEmpty
+    }
+
+    var drawsSelectionHighlight: Bool {
+        !selectionRects.isEmpty
+    }
+
+    var selectionHighlightColor: NSColor {
+        windowIsKey ? .selectedTextBackgroundColor : .unemphasizedSelectedTextBackgroundColor
     }
 
     override var isFlipped: Bool { true }
@@ -47,7 +61,17 @@ import ProseModel
         editorIsFirstResponder = isFirstResponder
     }
 
+    func setWindowIsKey(_ isKey: Bool) {
+        windowIsKey = isKey
+    }
+
     override func draw(_ dirtyRect: NSRect) {
+        if drawsSelectionHighlight {
+            selectionHighlightColor.setFill()
+            for rect in selectionRects where rect.intersects(dirtyRect) {
+                rect.fill()
+            }
+        }
         guard drawsCaret else { return }
         PlatformColor.label.setFill()
         caretRect.fill()
