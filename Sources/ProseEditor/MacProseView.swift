@@ -380,8 +380,8 @@ import SwiftUI
     private func updateSelectionLayer() {
         selectionLayer.selection = core.selection
         selectionLayer.caretRect = core.caretRect(for: core.selection.head)
-        selectionLayer.selectionRects = core.selectionRects(for: core.selection)
-        selectionLayer.setWindowIsKey(window?.isKeyWindow ?? true)
+        canvasView.selectionRects = core.selectionRects(for: core.selection)
+        canvasView.setWindowIsKey(window?.isKeyWindow ?? true)
     }
 
     private func handleMouseDown(_ event: NSEvent) {

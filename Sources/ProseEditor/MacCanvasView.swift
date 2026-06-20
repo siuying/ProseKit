@@ -5,6 +5,20 @@ import ProseModel
 
 @MainActor final class MacCanvasView: NSView {
     var layoutBox: LayoutBox?
+    var selectionRects: [CGRect] = [] {
+        didSet { needsDisplay = true }
+    }
+    private var windowIsKey = true {
+        didSet { needsDisplay = true }
+    }
+
+    var drawsSelectionHighlight: Bool {
+        !selectionRects.isEmpty
+    }
+
+    var selectionHighlightColor: NSColor {
+        windowIsKey ? .selectedTextBackgroundColor : .unemphasizedSelectedTextBackgroundColor
+    }
 
     override var isFlipped: Bool { true }
 
@@ -18,11 +32,24 @@ import ProseModel
         fatalError("init(coder:) is not supported")
     }
 
+    func setWindowIsKey(_ isKey: Bool) {
+        windowIsKey = isKey
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
         PlatformColor.canvasBackground.setFill()
         dirtyRect.fill()
+        drawSelectionHighlight(dirtyRect)
         drawCanvas(dirtyRect, in: context)
+    }
+
+    private func drawSelectionHighlight(_ dirtyRect: NSRect) {
+        guard drawsSelectionHighlight else { return }
+        selectionHighlightColor.setFill()
+        for rect in selectionRects where rect.intersects(dirtyRect) {
+            rect.fill()
+        }
     }
 
     func drawCanvas(_ dirtyRect: CGRect, in context: CGContext) {

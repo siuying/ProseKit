@@ -148,8 +148,8 @@ final class MacProseViewTests: XCTestCase {
         view.extendSelection(toContentPoint: end)
 
         XCTAssertEqual(view.core.selection, TextSelection(anchor: anchor, head: head))
-        XCTAssertEqual(view.selectionLayer.selectionRects, view.core.selectionRects(for: view.core.selection))
-        XCTAssertTrue(view.selectionLayer.drawsSelectionHighlight)
+        XCTAssertEqual(view.canvasView.selectionRects, view.core.selectionRects(for: view.core.selection))
+        XCTAssertTrue(view.canvasView.drawsSelectionHighlight)
         XCTAssertFalse(view.selectionLayer.drawsCaret)
     }
 
@@ -174,15 +174,34 @@ final class MacProseViewTests: XCTestCase {
     }
 
     func testMacSelectionHighlightUsesActiveAndInactiveWindowColors() throws {
-        let layer = MacSelectionLayerView()
-        layer.selectionRects = [CGRect(x: 1, y: 2, width: 3, height: 4)]
+        let canvas = MacCanvasView()
+        canvas.selectionRects = [CGRect(x: 1, y: 2, width: 3, height: 4)]
 
-        layer.setWindowIsKey(true)
-        let active = layer.selectionHighlightColor
-        layer.setWindowIsKey(false)
+        canvas.setWindowIsKey(true)
+        let active = canvas.selectionHighlightColor
+        canvas.setWindowIsKey(false)
 
-        XCTAssertTrue(layer.drawsSelectionHighlight)
-        XCTAssertNotEqual(active, layer.selectionHighlightColor)
+        XCTAssertTrue(canvas.drawsSelectionHighlight)
+        XCTAssertNotEqual(active, canvas.selectionHighlightColor)
+    }
+
+    func testMacSelectionHighlightDrawsBehindTextOnTheCanvas() throws {
+        let view = ProseView(document: Document(.doc([
+            .paragraph([.text("hello mac")]),
+        ])))
+        view.frame = CGRect(x: 0, y: 0, width: 320, height: 120)
+        view.layoutSubtreeIfNeeded()
+        let canvas = try XCTUnwrap(view.documentView)
+
+        view.beginSelection(atContentPoint: CGPoint(x: 40, y: 18))
+        view.extendSelection(toContentPoint: CGPoint(x: 92, y: 18))
+
+        // The highlight must be painted by the canvas, beneath the glyphs, so the
+        // selected text stays legible instead of being covered by an opaque fill.
+        XCTAssertEqual(view.canvasView.selectionRects, view.core.selectionRects(for: view.core.selection))
+        XCTAssertTrue(view.canvasView.drawsSelectionHighlight)
+        XCTAssertTrue(canvas.subviews.first === view.canvasView)
+        XCTAssertTrue(canvas.subviews.last === view.selectionLayer)
     }
 
     func testMacDoCommandMovesCaretAndExtendsSelection() throws {
