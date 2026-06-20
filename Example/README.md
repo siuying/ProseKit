@@ -15,6 +15,11 @@ on a different document:
   exercises every block and mark, or clears both — a truth test for whether our
   editor reads and writes the model the same way the reference does. The left
   pane loads Tiptap from a CDN, so it needs network access.
+- **UITextView Comparison** — a split screen with a native `UITextView` on the
+  left and a bare `ProseView` on the right, both seeded with the same plain text.
+  There's no bridge and no formatting bar: poke each editing surface to discover
+  where our behavior diverges from UIKit's — caret movement, selection handles,
+  the edit menu, autocorrect, and autoscroll.
 - **Rich Text Basics** — headings, paragraphs, and inline marks.
 - **Marks & Formatting** — toggle marks/headings from a toolbar or ⌘B/⌘I.
 - **Selection & Autoscroll** — system selection handles, edit menu, autoscroll.

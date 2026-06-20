@@ -96,6 +96,13 @@ private struct Demo: Identifiable, Hashable {
             makeDocument: { .parityShowcase }
         ),
         Demo(
+            id: "uitextview",
+            title: "UITextView Comparison",
+            subtitle: "Side-by-side with a native UITextView on the same plain text, to spot behavioral differences",
+            icon: "uiwindow.split.2x1",
+            makeDocument: { .uitextviewComparison }
+        ),
+        Demo(
             id: "basics",
             title: "Rich Text Basics",
             subtitle: "Headings, paragraphs, and inline marks rendered by the CoreText engine",
@@ -189,6 +196,8 @@ private struct DemoListView: View {
                     SimpleEditorScreen(demo: demo)
                 } else if demo.id == "parity" {
                     ParityScreen(demo: demo)
+                } else if demo.id == "uitextview" {
+                    UITextViewComparisonScreen(demo: demo)
                 } else {
                     DemoEditorScreen(demo: demo)
                 }
@@ -811,18 +820,80 @@ private struct ProseEditorView: UIViewRepresentable {
 
 private struct BaselineTextEditorView: UIViewRepresentable {
     let text: String
+    /// The performance benchmark needs the caret up immediately; the comparison
+    /// demo wants both panes idle until tapped, so this is opt-out.
+    var focusesOnAppear = true
 
     func makeUIView(context: Context) -> UITextView {
         let view = UITextView()
         view.font = .systemFont(ofSize: 17)
         view.text = text
-        DispatchQueue.main.async {
-            _ = view.becomeFirstResponder()
+        if focusesOnAppear {
+            DispatchQueue.main.async {
+                _ = view.becomeFirstResponder()
+            }
         }
         return view
     }
 
     func updateUIView(_ uiView: UITextView, context: Context) {}
+}
+
+// MARK: - UITextView Comparison (behavioral side-by-side)
+
+/// Splits the screen between a native `UITextView` (left) and a bare `ProseView`
+/// (right) seeded with the *same* plain text. Unlike Tiptap Parity there is no
+/// bridge between the panes and no formatting chrome — the point is to poke each
+/// editing surface and discover where our behavior diverges from UIKit's
+/// (caret movement, selection handles, the edit menu, autocorrect, autoscroll).
+private struct UITextViewComparisonScreen: View {
+    let demo: Demo
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                pane("UITextView (native)") {
+                    BaselineTextEditorView(
+                        text: Document.uitextviewComparisonText,
+                        focusesOnAppear: false
+                    )
+                }
+                Divider()
+                pane("Prose (ours)") {
+                    BareProseView(document: demo.makeDocument())
+                }
+            }
+        }
+        .navigationTitle(demo.title)
+        .navigationBarTitleDisplayMode(.inline)
+        .ignoresSafeArea(.keyboard)
+    }
+
+    private func pane<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(spacing: 0) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 5)
+                .background(.quaternary)
+            content()
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+/// A `ProseView` with no formatting toolbar and no auto-focus — the plainest
+/// editing surface we offer, so it compares apples-to-apples with a bare
+/// `UITextView`.
+private struct BareProseView: UIViewRepresentable {
+    let document: Document
+
+    func makeUIView(context: Context) -> ProseView {
+        ProseView(document: document)
+    }
+
+    func updateUIView(_ uiView: ProseView, context: Context) {}
 }
 
 // MARK: - Demo documents
@@ -843,6 +914,26 @@ extension Document {
         let body = String(repeating: sentence, count: 3)
         return "Paragraph \(n). " + body
     }
+
+    /// The single source of truth for the UITextView Comparison demo: a few long,
+    /// wrapping paragraphs that exercise caret movement, multi-line selection, the
+    /// edit menu, autocorrect, and drag-to-edge autoscroll. Both panes are built
+    /// from this same array so their starting content cannot drift apart.
+    private static let uitextviewComparisonParagraphs = [
+        "Type into either side and watch how they differ. Move the caret word by word, double-tap to select, drag the selection handles, and bring up the edit menu — the native UITextView on the left is the behavior we measure ourselves against.",
+        "This paragraph is deliberately long so it wraps across several lines on a phone. Wrapping is where caret arithmetic, line-fragment hit testing, and selection geometry tend to disagree, so compare where the caret lands when you tap mid-word or at the very end of a wrapped line.",
+        "Try autocorrect and predictive text, then undo with a three-finger swipe or a shake. Try selecting across this paragraph boundary into the next one, and drag toward the top or bottom edge to trigger autoscroll while a selection is active.",
+        "Finally, scroll both panes with a fling and see how momentum, rubber-banding, and the resting position compare. Small divergences here are exactly the kind of thing this side-by-side is meant to surface.",
+    ]
+
+    /// The comparison fixture as a ProseView Document (plain paragraphs, no marks).
+    fileprivate static let uitextviewComparison = Document(.doc(
+        uitextviewComparisonParagraphs.map { .paragraph([.text($0)]) }
+    ))
+
+    /// The same fixture as the plain string a UITextView understands.
+    fileprivate static let uitextviewComparisonText =
+        uitextviewComparisonParagraphs.joined(separator: "\n\n")
 
     fileprivate static let simpleEditor = Document(.doc([
         .heading(level: 1, [.text("Simple Editor")]),
