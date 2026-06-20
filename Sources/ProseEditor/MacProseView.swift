@@ -18,6 +18,7 @@ import SwiftUI
     private let editorContentView = MacEditorContentView()
     private var markedTextPositionRange: Range<Position>?
     private var markedTextSelectedRange = NSRange(location: NSNotFound, length: 0)
+    private var selectionAnchor: Position?
 
     public init(document: Document, schema: Schema = .slice1) {
         self.core = EditorCore(document: document, schema: schema)
@@ -28,8 +29,11 @@ import SwiftUI
         hasHorizontalScroller = false
         autohidesScrollers = true
         borderType = .noBorder
-        editorContentView.onMouseDown = { [weak self] point in
-            self?.placeCaret(atContentPoint: point)
+        editorContentView.onMouseDown = { [weak self] event in
+            self?.handleMouseDown(event)
+        }
+        editorContentView.onMouseDragged = { [weak self] point in
+            self?.extendSelection(toContentPoint: point)
         }
         editorContentView.addSubview(canvasView)
         editorContentView.addSubview(selectionLayer)
@@ -63,7 +67,11 @@ import SwiftUI
     }
 
     public override func mouseDown(with event: NSEvent) {
-        placeCaret(atContentPoint: convert(event.locationInWindow, from: nil))
+        handleMouseDown(event)
+    }
+
+    public override func mouseDragged(with event: NSEvent) {
+        extendSelection(toContentPoint: editorContentView.convert(event.locationInWindow, from: nil))
     }
 
     public override func keyDown(with event: NSEvent) {
@@ -87,8 +95,69 @@ import SwiftUI
         } else {
             _ = becomeFirstResponder()
         }
+        selectionAnchor = nil
         let position = core.closestPosition(to: point)
         core.setSelection(ProseModel.TextSelection(anchor: position, head: position))
+        updateSelectionLayer()
+    }
+
+    func beginSelection(atContentPoint point: CGPoint) {
+        if let window {
+            window.makeFirstResponder(self)
+        } else {
+            _ = becomeFirstResponder()
+        }
+        let position = core.closestPosition(to: point)
+        selectionAnchor = position
+        core.setSelection(ProseModel.TextSelection(anchor: position, head: position))
+        updateSelectionLayer()
+    }
+
+    func extendSelection(toContentPoint point: CGPoint) {
+        let head = core.closestPosition(to: point)
+        let anchor = selectionAnchor ?? core.selection.anchor
+        selectionAnchor = anchor
+        core.setSelection(ProseModel.TextSelection(anchor: anchor, head: head))
+        updateSelectionLayer()
+    }
+
+    func selectWord(atContentPoint point: CGPoint) {
+        let nearestPosition = core.closestPosition(to: point)
+        let text = Array(core.document.plainText)
+        guard !text.isEmpty else {
+            placeCaret(atContentPoint: point)
+            return
+        }
+        var index = min(characterOffset(for: nearestPosition), text.count - 1)
+        if text[index].isWhitespace, index > 0 {
+            index -= 1
+        }
+        var lower = index
+        var upper = index + 1
+        while lower > 0, !text[lower - 1].isWhitespace {
+            lower -= 1
+        }
+        while upper < text.count, !text[upper].isWhitespace {
+            upper += 1
+        }
+        let anchor = position(forCharacterOffset: lower)
+        let head = position(forCharacterOffset: upper)
+        selectionAnchor = anchor
+        core.setSelection(ProseModel.TextSelection(anchor: anchor, head: head))
+        updateSelectionLayer()
+    }
+
+    func selectParagraph(atContentPoint point: CGPoint) {
+        let position = core.closestPosition(to: point)
+        guard let info = core.document.blockInfo(containing: position),
+              let count = core.document.textCount(ofBlockAt: info.index) else {
+            placeCaret(atContentPoint: point)
+            return
+        }
+        let anchor = info.start + 1
+        let head = anchor + count
+        selectionAnchor = anchor
+        core.setSelection(ProseModel.TextSelection(anchor: anchor, head: head))
         updateSelectionLayer()
     }
 
@@ -114,6 +183,19 @@ import SwiftUI
     private func updateSelectionLayer() {
         selectionLayer.selection = core.selection
         selectionLayer.caretRect = core.caretRect(for: core.selection.head)
+        selectionLayer.selectionRects = core.selectionRects(for: core.selection)
+        selectionLayer.setWindowIsKey(window?.isKeyWindow ?? true)
+    }
+
+    private func handleMouseDown(_ event: NSEvent) {
+        let point = editorContentView.convert(event.locationInWindow, from: nil)
+        if event.clickCount >= 3 {
+            selectParagraph(atContentPoint: point)
+        } else if event.clickCount == 2 {
+            selectWord(atContentPoint: point)
+        } else {
+            beginSelection(atContentPoint: point)
+        }
     }
 
     private func insertTextFromInput(_ text: String, replacementRange: NSRange) {
@@ -254,19 +336,19 @@ extension ProseView: @preconcurrency NSTextInputClient {
         return String(describing: value)
     }
 
-    private func textSelection(forCharacterRange range: NSRange) -> ProseModel.TextSelection {
+    fileprivate func textSelection(forCharacterRange range: NSRange) -> ProseModel.TextSelection {
         let anchor = position(forCharacterOffset: range.location)
         let head = position(forCharacterOffset: range.location + range.length)
         return ProseModel.TextSelection(anchor: anchor, head: head)
     }
 
-    private func characterRange(for selection: ProseModel.TextSelection) -> NSRange {
+    fileprivate func characterRange(for selection: ProseModel.TextSelection) -> NSRange {
         let anchor = characterOffset(for: selection.anchor)
         let head = characterOffset(for: selection.head)
         return NSRange(location: min(anchor, head), length: head >= anchor ? head - anchor : anchor - head)
     }
 
-    private func characterOffset(for position: Position) -> Int {
+    fileprivate func characterOffset(for position: Position) -> Int {
         guard let info = core.document.blockInfo(containing: position),
               let blockTextStart = core.document.blockTextStart(at: position),
               let textCount = core.document.textCount(ofBlockAt: info.index),
@@ -277,7 +359,7 @@ extension ProseView: @preconcurrency NSTextInputClient {
         return charactersBefore + local
     }
 
-    private func position(forCharacterOffset offset: Int) -> Position {
+    fileprivate func position(forCharacterOffset offset: Int) -> Position {
         var remaining = max(0, offset)
         for blockIndex in 0..<core.document.blockCount {
             guard let count = core.document.textCount(ofBlockAt: blockIndex),
@@ -292,7 +374,8 @@ extension ProseView: @preconcurrency NSTextInputClient {
 }
 
 @MainActor final class MacEditorContentView: NSView {
-    var onMouseDown: ((CGPoint) -> Void)?
+    var onMouseDown: ((NSEvent) -> Void)?
+    var onMouseDragged: ((CGPoint) -> Void)?
 
     override var isFlipped: Bool { true }
 
@@ -307,7 +390,11 @@ extension ProseView: @preconcurrency NSTextInputClient {
     }
 
     override func mouseDown(with event: NSEvent) {
-        onMouseDown?(convert(event.locationInWindow, from: nil))
+        onMouseDown?(event)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        onMouseDragged?(convert(event.locationInWindow, from: nil))
     }
 }
 
