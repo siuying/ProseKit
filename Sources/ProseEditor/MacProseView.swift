@@ -16,6 +16,8 @@ import SwiftUI
     let canvasView = MacCanvasView()
     let selectionLayer = MacSelectionLayerView()
     private let editorContentView = MacEditorContentView()
+    private var markedTextPositionRange: Range<Position>?
+    private var markedTextSelectedRange = NSRange(location: NSNotFound, length: 0)
 
     public init(document: Document, schema: Schema = .slice1) {
         self.core = EditorCore(document: document, schema: schema)
@@ -64,6 +66,21 @@ import SwiftUI
         placeCaret(atContentPoint: convert(event.locationInWindow, from: nil))
     }
 
+    public override func keyDown(with event: NSEvent) {
+        interpretKeyEvents([event])
+    }
+
+    public override func doCommand(by selector: Selector) {
+        switch selector {
+        case #selector(NSResponder.deleteBackward(_:)):
+            deleteBackwardFromInput()
+        case #selector(NSResponder.insertNewline(_:)):
+            runInputCommand(Commands.splitBlock())
+        default:
+            super.doCommand(by: selector)
+        }
+    }
+
     func placeCaret(atContentPoint point: CGPoint) {
         if let window {
             window.makeFirstResponder(self)
@@ -71,7 +88,7 @@ import SwiftUI
             _ = becomeFirstResponder()
         }
         let position = core.closestPosition(to: point)
-        core.setSelection(TextSelection(anchor: position, head: position))
+        core.setSelection(ProseModel.TextSelection(anchor: position, head: position))
         updateSelectionLayer()
     }
 
@@ -97,6 +114,180 @@ import SwiftUI
     private func updateSelectionLayer() {
         selectionLayer.selection = core.selection
         selectionLayer.caretRect = core.caretRect(for: core.selection.head)
+    }
+
+    private func insertTextFromInput(_ text: String, replacementRange: NSRange) {
+        let hadMarkedText = hasMarkedText()
+        selectReplacementRange(replacementRange)
+        let segments = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        for (index, segment) in segments.enumerated() {
+            if index > 0 {
+                _ = core.run(Commands.splitBlock())
+            }
+            if !segment.isEmpty || segments.count == 1 {
+                do {
+                    try core.insertText(segment)
+                } catch is StepError {
+                    // Unsupported edit: leave the document untouched.
+                } catch {
+                    assertionFailure("insertText failed: \(error)")
+                }
+            }
+        }
+        if hadMarkedText || replacementRange.location != NSNotFound {
+            clearMarkedText()
+        }
+        relayout()
+    }
+
+    private func deleteBackwardFromInput() {
+        do {
+            if try core.dispatch(Commands.joinBackward())
+                || core.dispatch(Commands.liftOutOfContainer()) {
+                relayout()
+                return
+            }
+            try core.deleteBackward()
+        } catch is StepError {
+            // Unsupported edit: leave the document untouched.
+        } catch {
+            assertionFailure("deleteBackward failed: \(error)")
+        }
+        relayout()
+    }
+
+    private func runInputCommand(_ command: Command) {
+        _ = core.run(command)
+        relayout()
+    }
+
+    private func selectReplacementRange(_ replacementRange: NSRange) {
+        guard replacementRange.location != NSNotFound else { return }
+        core.setSelection(textSelection(forCharacterRange: replacementRange))
+    }
+
+    private func clearMarkedText() {
+        markedTextPositionRange = nil
+        markedTextSelectedRange = NSRange(location: NSNotFound, length: 0)
+    }
+}
+
+extension ProseView: @preconcurrency NSTextInputClient {
+    public func insertText(_ string: Any, replacementRange: NSRange) {
+        insertTextFromInput(Self.inputString(from: string), replacementRange: replacementRange)
+    }
+
+    public func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
+        let text = Self.inputString(from: string)
+        guard !text.isEmpty else {
+            unmarkText()
+            return
+        }
+        if let markedTextPositionRange, replacementRange.location == NSNotFound {
+            core.setSelection(ProseModel.TextSelection(anchor: markedTextPositionRange.lowerBound, head: markedTextPositionRange.upperBound))
+        } else {
+            selectReplacementRange(replacementRange)
+        }
+        let lower = min(core.selection.anchor, core.selection.head)
+        insertTextFromInput(text, replacementRange: NSRange(location: NSNotFound, length: 0))
+        markedTextPositionRange = lower..<(lower + text.count)
+        markedTextSelectedRange = selectedRange
+        let selectedStart = core.clamp(lower + selectedRange.location)
+        let selectedEnd = core.clamp(selectedStart + selectedRange.length)
+        core.setSelection(ProseModel.TextSelection(anchor: selectedStart, head: selectedEnd))
+        updateSelectionLayer()
+    }
+
+    public func unmarkText() {
+        clearMarkedText()
+    }
+
+    public func selectedRange() -> NSRange {
+        characterRange(for: core.selection)
+    }
+
+    public func markedRange() -> NSRange {
+        guard let markedTextPositionRange else {
+            return NSRange(location: NSNotFound, length: 0)
+        }
+        let start = characterOffset(for: markedTextPositionRange.lowerBound)
+        let end = characterOffset(for: markedTextPositionRange.upperBound)
+        return NSRange(location: start, length: max(0, end - start))
+    }
+
+    public func hasMarkedText() -> Bool {
+        markedTextPositionRange != nil
+    }
+
+    public func attributedSubstring(forProposedRange range: NSRange, actualRange: NSRangePointer?) -> NSAttributedString? {
+        let text = core.document.plainText
+        let lower = max(0, min(range.location, text.count))
+        let upper = max(lower, min(range.location + range.length, text.count))
+        let start = text.index(text.startIndex, offsetBy: lower)
+        let end = text.index(text.startIndex, offsetBy: upper)
+        actualRange?.pointee = NSRange(location: lower, length: upper - lower)
+        return NSAttributedString(string: String(text[start..<end]))
+    }
+
+    public func validAttributesForMarkedText() -> [NSAttributedString.Key] {
+        []
+    }
+
+    public func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect {
+        actualRange?.pointee = range
+        let position = position(forCharacterOffset: range.location)
+        let rect = core.caretRect(for: position)
+        let windowRect = editorContentView.convert(rect, to: nil)
+        return window?.convertToScreen(windowRect) ?? windowRect
+    }
+
+    public func characterIndex(for point: NSPoint) -> Int {
+        let windowPoint = window?.convertPoint(fromScreen: point) ?? point
+        let contentPoint = editorContentView.convert(windowPoint, from: nil)
+        return characterOffset(for: core.closestPosition(to: contentPoint))
+    }
+
+    private static func inputString(from value: Any) -> String {
+        if let attributed = value as? NSAttributedString {
+            return attributed.string
+        }
+        return String(describing: value)
+    }
+
+    private func textSelection(forCharacterRange range: NSRange) -> ProseModel.TextSelection {
+        let anchor = position(forCharacterOffset: range.location)
+        let head = position(forCharacterOffset: range.location + range.length)
+        return ProseModel.TextSelection(anchor: anchor, head: head)
+    }
+
+    private func characterRange(for selection: ProseModel.TextSelection) -> NSRange {
+        let anchor = characterOffset(for: selection.anchor)
+        let head = characterOffset(for: selection.head)
+        return NSRange(location: min(anchor, head), length: head >= anchor ? head - anchor : anchor - head)
+    }
+
+    private func characterOffset(for position: Position) -> Int {
+        guard let info = core.document.blockInfo(containing: position),
+              let blockTextStart = core.document.blockTextStart(at: position),
+              let textCount = core.document.textCount(ofBlockAt: info.index),
+              let charactersBefore = core.document.textCharacters(beforeBlockAt: info.index) else {
+            return core.document.totalTextCount
+        }
+        let local = max(0, min(textCount, position - blockTextStart))
+        return charactersBefore + local
+    }
+
+    private func position(forCharacterOffset offset: Int) -> Position {
+        var remaining = max(0, offset)
+        for blockIndex in 0..<core.document.blockCount {
+            guard let count = core.document.textCount(ofBlockAt: blockIndex),
+                  let start = core.document.position(ofTextInBlockAt: blockIndex) else { continue }
+            if remaining <= count {
+                return start + remaining
+            }
+            remaining -= count
+        }
+        return core.document.endTextPosition
     }
 }
 
