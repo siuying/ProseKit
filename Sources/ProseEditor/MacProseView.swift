@@ -13,7 +13,9 @@ import SwiftUI
     }
 
     public let core: EditorCore
-    private let canvas = MacCanvasView()
+    let canvasView = MacCanvasView()
+    let selectionLayer = MacSelectionLayerView()
+    private let editorContentView = MacEditorContentView()
 
     public init(document: Document, schema: Schema = .slice1) {
         self.core = EditorCore(document: document, schema: schema)
@@ -24,7 +26,12 @@ import SwiftUI
         hasHorizontalScroller = false
         autohidesScrollers = true
         borderType = .noBorder
-        documentView = canvas
+        editorContentView.onMouseDown = { [weak self] point in
+            self?.placeCaret(atContentPoint: point)
+        }
+        editorContentView.addSubview(canvasView)
+        editorContentView.addSubview(selectionLayer)
+        documentView = editorContentView
         setAccessibilityElement(true)
         setAccessibilityRole(.textArea)
         setAccessibilityLabel("Prose editor")
@@ -41,19 +48,75 @@ import SwiftUI
         relayout()
     }
 
+    public override var acceptsFirstResponder: Bool { true }
+
+    public override func becomeFirstResponder() -> Bool {
+        selectionLayer.setEditorIsFirstResponder(true)
+        return true
+    }
+
+    public override func resignFirstResponder() -> Bool {
+        selectionLayer.setEditorIsFirstResponder(false)
+        return true
+    }
+
+    public override func mouseDown(with event: NSEvent) {
+        placeCaret(atContentPoint: convert(event.locationInWindow, from: nil))
+    }
+
+    func placeCaret(atContentPoint point: CGPoint) {
+        if let window {
+            window.makeFirstResponder(self)
+        } else {
+            _ = becomeFirstResponder()
+        }
+        let position = core.closestPosition(to: point)
+        core.setSelection(TextSelection(anchor: position, head: position))
+        updateSelectionLayer()
+    }
+
     private func relayout() {
         let width = max(1, contentView.bounds.width)
         core.relayout(width: width)
         setAccessibilityValue(core.document.plainText)
-        canvas.layoutBox = core.layoutBox
+        canvasView.layoutBox = core.layoutBox
         let contentSize = core.layoutBox?.frame.size ?? .zero
-        canvas.frame = CGRect(
+        let frame = CGRect(
             x: 0,
             y: 0,
             width: width,
             height: max(contentView.bounds.height, contentSize.height)
         )
-        canvas.needsDisplay = true
+        editorContentView.frame = frame
+        canvasView.frame = editorContentView.bounds
+        selectionLayer.frame = editorContentView.bounds
+        canvasView.needsDisplay = true
+        updateSelectionLayer()
+    }
+
+    private func updateSelectionLayer() {
+        selectionLayer.selection = core.selection
+        selectionLayer.caretRect = core.caretRect(for: core.selection.head)
+    }
+}
+
+@MainActor final class MacEditorContentView: NSView {
+    var onMouseDown: ((CGPoint) -> Void)?
+
+    override var isFlipped: Bool { true }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = false
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        onMouseDown?(convert(event.locationInWindow, from: nil))
     }
 }
 
