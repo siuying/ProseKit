@@ -157,6 +157,21 @@ import SwiftUI
         insertTextFromInput(text, replacementRange: NSRange(location: NSNotFound, length: 0))
     }
 
+    @objc public func undo(_ sender: Any?) {
+        guard core.undo() else { return }
+        relayout()
+    }
+
+    @objc public func redo(_ sender: Any?) {
+        guard core.redo() else { return }
+        relayout()
+    }
+
+    public override func selectAll(_ sender: Any?) {
+        core.setSelection(ProseModel.TextSelection(anchor: core.document.startTextPosition, head: core.document.endTextPosition))
+        updateSelectionLayer()
+    }
+
     @objc public func toggleBoldface(_ sender: Any?) {
         runKeyBinding(key: .character("b"), modifiers: .command)
     }
@@ -177,6 +192,10 @@ import SwiftUI
         case #selector(toggleItalics(_:)):
             menuItem.state = core.state.isActive(.italic) ? .on : .off
             return true
+        case #selector(undo(_:)):
+            return core.canUndo
+        case #selector(redo(_:)):
+            return core.canRedo
         default:
             break
         }
@@ -372,6 +391,8 @@ import SwiftUI
             return core.canPerformEditAction(.cut, pasteboardHasStrings: pasteboard.hasStrings)
         case #selector(paste(_:)):
             return core.canPerformEditAction(.paste, pasteboardHasStrings: pasteboard.hasStrings)
+        case #selector(selectAll(_:)):
+            return core.canPerformEditAction(.selectAll, pasteboardHasStrings: pasteboard.hasStrings)
         default:
             return true
         }

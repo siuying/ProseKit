@@ -21,10 +21,38 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         if NSApp.mainMenu == nil {
             NSApp.mainMenu = mainMenu
         }
-        guard mainMenu.item(withTitle: "Format") == nil else { return }
-        let formatItem = NSMenuItem(title: "Format", action: nil, keyEquivalent: "")
-        formatItem.submenu = MacProseFormatMenu.makeMenu()
-        mainMenu.addItem(formatItem)
+        installMenu(title: "Edit", menu: MacProseEditMenu.makeMenu(), in: mainMenu, at: 1)
+        installMenu(title: "Format", menu: MacProseFormatMenu.makeMenu(), in: mainMenu, at: 2)
+    }
+
+    private func installMenu(title: String, menu: NSMenu, in mainMenu: NSMenu, at index: Int) {
+        if let existing = mainMenu.item(withTitle: title) {
+            mainMenu.removeItem(existing)
+        }
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.submenu = menu
+        mainMenu.insertItem(item, at: min(index, mainMenu.items.count))
+    }
+}
+
+private enum MacProseEditMenu {
+    static func makeMenu() -> NSMenu {
+        let menu = NSMenu(title: "Edit")
+        menu.addItem(item("Undo", action: #selector(ProseView.undo(_:)), key: "z", modifiers: .command))
+        menu.addItem(item("Redo", action: #selector(ProseView.redo(_:)), key: "z", modifiers: [.command, .shift]))
+        menu.addItem(.separator())
+        menu.addItem(item("Cut", action: #selector(ProseView.cut(_:)), key: "x", modifiers: .command))
+        menu.addItem(item("Copy", action: #selector(ProseView.copy(_:)), key: "c", modifiers: .command))
+        menu.addItem(item("Paste", action: #selector(ProseView.paste(_:)), key: "v", modifiers: .command))
+        menu.addItem(.separator())
+        menu.addItem(item("Select All", action: #selector(ProseView.selectAll(_:)), key: "a", modifiers: .command))
+        return menu
+    }
+
+    private static func item(_ title: String, action: Selector, key: String, modifiers: NSEvent.ModifierFlags) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+        item.keyEquivalentModifierMask = modifiers
+        return item
     }
 }
 

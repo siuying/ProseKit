@@ -85,4 +85,27 @@ final class ProseExampleMacUITests: XCTestCase {
         value = try XCTUnwrap(editor.value as? String)
         XCTAssertFalse(value.contains("\t"))
     }
+
+    @MainActor
+    func testMacEditorUndoRedoThroughEditMenuKeyEquivalents() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        let editor = app.textViews["Prose editor"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 10))
+        editor.click()
+        editor.typeKey(.rightArrow, modifierFlags: [.command])
+        editor.typeText("HISTORY")
+
+        var value = try XCTUnwrap(editor.value as? String)
+        XCTAssertTrue(value.contains("HISTORY"))
+
+        editor.typeKey("z", modifierFlags: [.command])
+        value = try XCTUnwrap(editor.value as? String)
+        XCTAssertFalse(value.contains("HISTORY"))
+
+        editor.typeKey("z", modifierFlags: [.command, .shift])
+        value = try XCTUnwrap(editor.value as? String)
+        XCTAssertTrue(value.contains("HISTORY"))
+    }
 }

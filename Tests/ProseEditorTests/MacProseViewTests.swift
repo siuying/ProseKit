@@ -362,6 +362,34 @@ final class MacProseViewTests: XCTestCase {
         XCTAssertEqual(boldItem.state, .on)
     }
 
+    func testMacEditMenuActionsUseCoreHistoryAndSelectionQueries() throws {
+        let view = ProseView(document: Document(.doc([
+            .paragraph([.text("hello")]),
+        ])))
+        view.frame = CGRect(x: 0, y: 0, width: 320, height: 120)
+        view.layoutSubtreeIfNeeded()
+        let end = view.document.endTextPosition
+        view.core.setSelection(TextSelection(anchor: end, head: end))
+        let undoItem = NSMenuItem(title: "Undo", action: #selector(ProseView.undo(_:)), keyEquivalent: "z")
+        let redoItem = NSMenuItem(title: "Redo", action: #selector(ProseView.redo(_:)), keyEquivalent: "z")
+        let selectAllItem = NSMenuItem(title: "Select All", action: #selector(ProseView.selectAll(_:)), keyEquivalent: "a")
+
+        XCTAssertFalse(view.validateMenuItem(undoItem))
+        view.insertText("!", replacementRange: NSRange(location: NSNotFound, length: 0))
+
+        XCTAssertTrue(view.validateMenuItem(undoItem))
+        view.undo(nil)
+        XCTAssertEqual(view.document.plainText, "hello")
+
+        XCTAssertTrue(view.validateMenuItem(redoItem))
+        view.redo(nil)
+        XCTAssertEqual(view.document.plainText, "hello!")
+
+        XCTAssertTrue(view.validateMenuItem(selectAllItem))
+        view.selectAll(nil)
+        XCTAssertEqual(view.core.selection, TextSelection(anchor: view.document.startTextPosition, head: view.document.endTextPosition))
+    }
+
     func testMacHighlightPaletteResolvesAcrossAppearances() throws {
         let palette = try XCTUnwrap(HighlightColor.color(for: "#ffd54f"))
         let light = try XCTUnwrap(NSAppearance(named: .aqua))
