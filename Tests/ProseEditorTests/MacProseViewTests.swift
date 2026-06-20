@@ -185,6 +185,62 @@ final class MacProseViewTests: XCTestCase {
         XCTAssertNotEqual(active, layer.selectionHighlightColor)
     }
 
+    func testMacDoCommandMovesCaretAndExtendsSelection() throws {
+        let view = ProseView(document: Document(.doc([
+            .paragraph([.text("hello")]),
+        ])))
+        view.frame = CGRect(x: 0, y: 0, width: 320, height: 120)
+        view.layoutSubtreeIfNeeded()
+        let start = try XCTUnwrap(view.document.position(ofTextInBlockAt: 0))
+        view.core.setSelection(TextSelection(anchor: start + 2, head: start + 2))
+
+        view.doCommand(by: #selector(NSResponder.moveRight(_:)))
+        XCTAssertEqual(view.core.selection, TextSelection(anchor: start + 3, head: start + 3))
+
+        view.doCommand(by: #selector(NSResponder.moveLeftAndModifySelection(_:)))
+        XCTAssertEqual(view.core.selection, TextSelection(anchor: start + 3, head: start + 2))
+        XCTAssertEqual(view.selectionLayer.selection, view.core.selection)
+    }
+
+    func testMacDoCommandMovesByWordAndToParagraphEdges() throws {
+        let view = ProseView(document: Document(.doc([
+            .paragraph([.text("hello world")]),
+        ])))
+        view.frame = CGRect(x: 0, y: 0, width: 320, height: 120)
+        view.layoutSubtreeIfNeeded()
+        let start = try XCTUnwrap(view.document.position(ofTextInBlockAt: 0))
+        view.core.setSelection(TextSelection(anchor: start, head: start))
+
+        view.doCommand(by: #selector(NSResponder.moveWordRight(_:)))
+        XCTAssertEqual(view.core.selection, TextSelection(anchor: start + 5, head: start + 5))
+
+        view.doCommand(by: #selector(NSResponder.moveWordRightAndModifySelection(_:)))
+        XCTAssertEqual(view.core.selection, TextSelection(anchor: start + 5, head: start + 11))
+
+        view.doCommand(by: #selector(NSResponder.moveToBeginningOfParagraph(_:)))
+        XCTAssertEqual(view.core.selection, TextSelection(anchor: start, head: start))
+
+        view.doCommand(by: #selector(NSResponder.moveToEndOfParagraph(_:)))
+        XCTAssertEqual(view.core.selection, TextSelection(anchor: start + 11, head: start + 11))
+    }
+
+    func testMacDoCommandDeletesWords() throws {
+        let view = ProseView(document: Document(.doc([
+            .paragraph([.text("hello world")]),
+        ])))
+        view.frame = CGRect(x: 0, y: 0, width: 320, height: 120)
+        view.layoutSubtreeIfNeeded()
+        let start = try XCTUnwrap(view.document.position(ofTextInBlockAt: 0))
+        view.core.setSelection(TextSelection(anchor: start + 11, head: start + 11))
+
+        view.doCommand(by: #selector(NSResponder.deleteWordBackward(_:)))
+        XCTAssertEqual(view.document.plainText, "hello ")
+
+        view.core.setSelection(TextSelection(anchor: start, head: start))
+        view.doCommand(by: #selector(NSResponder.deleteWordForward(_:)))
+        XCTAssertEqual(view.document.plainText, " ")
+    }
+
     func testMacHighlightPaletteResolvesAcrossAppearances() throws {
         let palette = try XCTUnwrap(HighlightColor.color(for: "#ffd54f"))
         let light = try XCTUnwrap(NSAppearance(named: .aqua))
