@@ -13,12 +13,7 @@ extension ProseView {
             let selection = range.textSelection
             guard selection != state.selection else { return }
             inputDelegate?.selectionWillChange(self)
-            state = EditorState(
-                document: state.document,
-                selection: selection,
-                lastTransaction: state.lastTransaction,
-                typingMarks: state.typingMarks
-            )
+            core.setSelection(selection)
             // No canvas repaint: the Canvas draws no selection-dependent
             // content (the caret and selection overlay are the system's
             // UITextInteraction chrome), so a selection change leaves every
@@ -57,12 +52,7 @@ extension ProseView {
         // Adopt the range as the selection, then insert: autocorrect and
         // dictation get the same newline segmentation (and pending typing
         // Marks at a collapsed caret) as typed text.
-        state = EditorState(
-            document: state.document,
-            selection: range.textSelection,
-            lastTransaction: state.lastTransaction,
-            typingMarks: state.typingMarks
-        )
+        core.setSelection(range.textSelection)
         insertText(text)
     }
 
