@@ -5,9 +5,9 @@ import UIKit
 
 @MainActor public final class ProseView: UIScrollView, UITextInput {
     public var document: Document {
-        get { state.document }
+        get { core.document }
         set {
-            state = EditorState(document: newValue)
+            core.document = newValue
             relayout()
             canvas.setNeedsDisplay()
         }
@@ -23,10 +23,11 @@ import UIKit
     /// `UIPasteboard.general` is unavailable to unhosted test bundles.
     public var pasteboard: UIPasteboard = .general
 
-    var state: EditorState
-    var layoutStore: IncrementalLayoutStore
-    var layoutBox: LayoutBox?
-    let geometryMapper = GeometryMapper()
+    let core: EditorCore
+    var state: EditorState { core.state }
+    var layoutStore: IncrementalLayoutStore { core.layoutStore }
+    var layoutBox: LayoutBox? { core.layoutBox }
+    var geometryMapper: GeometryMapper { core.geometryMapper }
     lazy var proseTokenizer = UITextInputStringTokenizer(textInput: self)
     /// The Canvas (ADR 0002); it owns all drawing — see CanvasView.
     let canvas = CanvasView()
@@ -36,8 +37,7 @@ import UIKit
     private var checkboxTap: UITapGestureRecognizer?
 
     public init(document: Document, schema: Schema = .slice1) {
-        self.state = EditorState(document: document)
-        self.layoutStore = IncrementalLayoutStore(schema: schema, width: 0)
+        self.core = EditorCore(document: document, schema: schema)
         super.init(frame: .zero)
         backgroundColor = .systemBackground
         canvas.isUserInteractionEnabled = false
@@ -219,16 +219,7 @@ import UIKit
 
     private func relayout(changedRange: Range<Position>? = nil) {
         guard bounds.width > 0 else { return }
-        layoutStore.width = bounds.width
-        do {
-            layoutBox = try layoutStore.layout(state.document, changedRange: changedRange)
-        } catch is SchemaError {
-            // A host handed the editor a document outside the Schema —
-            // rejected input, not a broken invariant. Keep the previous
-            // layout (or stay blank before a first layout).
-        } catch {
-            assertionFailure("relayout failed: \(error)")
-        }
+        core.relayout(width: bounds.width, changedRange: changedRange)
         canvas.layoutBox = layoutBox
         contentSize = layoutBox?.frame.size ?? .zero
     }
@@ -338,15 +329,15 @@ import UIKit
     }
 
     private func insertPlainText(_ text: String) {
-        performEdit { try state.insertText(text) }
+        performEdit { try core.insertText(text) }
     }
 
     public func deleteBackward() {
         do {
             // At a block's text start: join into the previous sibling, or — when
             // it is the first child of a container — lift it out of the container.
-            if try Commands.joinBackward().run(in: &state)
-                || Commands.liftOutOfContainer().run(in: &state) {
+            if try core.dispatch(Commands.joinBackward())
+                || core.dispatch(Commands.liftOutOfContainer()) {
                 relayoutAndDisplayEdit()
                 return
             }
@@ -355,7 +346,7 @@ import UIKit
             // break, not a boundary condition.
             assertionFailure("backspace structural command failed: \(error)")
         }
-        performEdit { try state.deleteBackward() }
+        performEdit { try core.deleteBackward() }
     }
 
     /// Runs an edit between the input delegate's will/did notifications and
@@ -381,7 +372,7 @@ import UIKit
         // its dirty rect repaints an already-clean region, never too little.
         let selectionBefore = state.selection
         inputDelegate?.selectionWillChange(self)
-        performEdit { _ = try command.run(in: &state) }
+        performEdit { _ = try core.dispatch(command) }
         // Block formatting (heading/list/align) keeps the *same* selection range
         // but reflows the glyphs under it, so UIKit — which treats an unchanged
         // range as nothing to re-measure — must be forced to refresh the
@@ -446,12 +437,7 @@ import UIKit
     @discardableResult
     func toggleTaskCheckbox(at point: CGPoint) -> Bool {
         guard let position = taskCheckboxPosition(at: point) else { return false }
-        state = EditorState(
-            document: state.document,
-            selection: TextSelection(anchor: position, head: position),
-            lastTransaction: state.lastTransaction,
-            typingMarks: state.typingMarks
-        )
+        core.setSelection(TextSelection(anchor: position, head: position))
         toggleTaskItemChecked()
         return true
     }
