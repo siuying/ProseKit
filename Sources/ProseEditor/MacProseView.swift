@@ -84,6 +84,46 @@ import SwiftUI
             deleteBackwardFromInput()
         case #selector(NSResponder.insertNewline(_:)):
             runInputCommand(Commands.splitBlock())
+        case #selector(NSResponder.moveLeft(_:)):
+            moveCaret(to: core.position(before: core.selection.head), extending: false)
+        case #selector(NSResponder.moveRight(_:)):
+            moveCaret(to: core.position(after: core.selection.head), extending: false)
+        case #selector(NSResponder.moveUp(_:)):
+            moveCaret(to: core.position(above: core.selection.head), extending: false)
+        case #selector(NSResponder.moveDown(_:)):
+            moveCaret(to: core.position(below: core.selection.head), extending: false)
+        case #selector(NSResponder.moveLeftAndModifySelection(_:)):
+            moveCaret(to: core.position(before: core.selection.head), extending: true)
+        case #selector(NSResponder.moveRightAndModifySelection(_:)):
+            moveCaret(to: core.position(after: core.selection.head), extending: true)
+        case #selector(NSResponder.moveUpAndModifySelection(_:)):
+            moveCaret(to: core.position(above: core.selection.head), extending: true)
+        case #selector(NSResponder.moveDownAndModifySelection(_:)):
+            moveCaret(to: core.position(below: core.selection.head), extending: true)
+        case #selector(NSResponder.moveWordLeft(_:)):
+            moveCaret(to: wordBoundary(from: core.selection.head, direction: .backward), extending: false)
+        case #selector(NSResponder.moveWordRight(_:)):
+            moveCaret(to: wordBoundary(from: core.selection.head, direction: .forward), extending: false)
+        case #selector(NSResponder.moveWordLeftAndModifySelection(_:)):
+            moveCaret(to: wordBoundary(from: core.selection.head, direction: .backward), extending: true)
+        case #selector(NSResponder.moveWordRightAndModifySelection(_:)):
+            moveCaret(to: wordBoundary(from: core.selection.head, direction: .forward), extending: true)
+        case #selector(NSResponder.moveToBeginningOfLine(_:)),
+             #selector(NSResponder.moveToBeginningOfParagraph(_:)):
+            moveCaret(to: paragraphBoundary(from: core.selection.head, edge: .start), extending: false)
+        case #selector(NSResponder.moveToEndOfLine(_:)),
+             #selector(NSResponder.moveToEndOfParagraph(_:)):
+            moveCaret(to: paragraphBoundary(from: core.selection.head, edge: .end), extending: false)
+        case #selector(NSResponder.moveToBeginningOfLineAndModifySelection(_:)),
+             #selector(NSResponder.moveToBeginningOfParagraphAndModifySelection(_:)):
+            moveCaret(to: paragraphBoundary(from: core.selection.head, edge: .start), extending: true)
+        case #selector(NSResponder.moveToEndOfLineAndModifySelection(_:)),
+             #selector(NSResponder.moveToEndOfParagraphAndModifySelection(_:)):
+            moveCaret(to: paragraphBoundary(from: core.selection.head, edge: .end), extending: true)
+        case #selector(NSResponder.deleteWordBackward(_:)):
+            deleteWord(direction: .backward)
+        case #selector(NSResponder.deleteWordForward(_:)):
+            deleteWord(direction: .forward)
         default:
             super.doCommand(by: selector)
         }
@@ -159,6 +199,72 @@ import SwiftUI
         selectionAnchor = anchor
         core.setSelection(ProseModel.TextSelection(anchor: anchor, head: head))
         updateSelectionLayer()
+    }
+
+    private enum TextDirection {
+        case backward
+        case forward
+    }
+
+    private enum ParagraphEdge {
+        case start
+        case end
+    }
+
+    private func moveCaret(to position: Position, extending: Bool) {
+        let clamped = core.clamp(position)
+        let anchor = extending ? core.selection.anchor : clamped
+        core.setSelection(ProseModel.TextSelection(anchor: anchor, head: clamped))
+        selectionAnchor = extending ? anchor : nil
+        updateSelectionLayer()
+    }
+
+    private func paragraphBoundary(from position: Position, edge: ParagraphEdge) -> Position {
+        guard let info = core.document.blockInfo(containing: position),
+              let count = core.document.textCount(ofBlockAt: info.index) else {
+            return position
+        }
+        let start = info.start + 1
+        return edge == .start ? start : start + count
+    }
+
+    private func wordBoundary(from position: Position, direction: TextDirection) -> Position {
+        let text = Array(core.document.plainText)
+        guard !text.isEmpty else { return position }
+        switch direction {
+        case .forward:
+            var offset = min(characterOffset(for: position), text.count)
+            while offset < text.count, text[offset].isWhitespace {
+                offset += 1
+            }
+            while offset < text.count, !text[offset].isWhitespace {
+                offset += 1
+            }
+            return self.position(forCharacterOffset: offset)
+        case .backward:
+            var offset = min(characterOffset(for: position), text.count)
+            while offset > 0, text[offset - 1].isWhitespace {
+                offset -= 1
+            }
+            while offset > 0, !text[offset - 1].isWhitespace {
+                offset -= 1
+            }
+            return self.position(forCharacterOffset: offset)
+        }
+    }
+
+    private func deleteWord(direction: TextDirection) {
+        let target = wordBoundary(from: core.selection.head, direction: direction)
+        guard target != core.selection.head else { return }
+        core.setSelection(ProseModel.TextSelection(anchor: core.selection.head, head: target))
+        do {
+            try core.insertText("")
+        } catch is StepError {
+            // Unsupported edit: leave the document untouched.
+        } catch {
+            assertionFailure("delete word failed: \(error)")
+        }
+        relayout()
     }
 
     private func relayout() {
