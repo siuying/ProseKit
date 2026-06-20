@@ -604,7 +604,14 @@ import UIKit
             super.pressesBegan(presses, with: event)
             return
         }
-        moveCaret(direction, extending: key.modifierFlags.contains(.shift))
+        let extending = key.modifierFlags.contains(.shift)
+        // Option+Left/Right moves by word like UITextView; the modifier is
+        // meaningless on the vertical arrows, so those stay single-step.
+        if key.modifierFlags.contains(.alternate), direction == .left || direction == .right {
+            moveCaretByWord(direction, extending: extending)
+        } else {
+            moveCaret(direction, extending: extending)
+        }
     }
 
     private static func arrowDirection(for key: UIKey) -> UITextLayoutDirection? {
@@ -637,6 +644,46 @@ import UIKit
         }
         selectedTextRange = ProseTextRange(anchor: extending ? selection.anchor : head.position, head: head.position)
         scrollCaretToVisible()
+    }
+
+    /// Word-granular caret movement (Option+Arrow), matching UITextView:
+    /// Option+Right lands at the end of the next word, Option+Left at the start
+    /// of the previous one. Internal so tests can drive it: UIPress events
+    /// cannot be synthesized.
+    func moveCaretByWord(_ direction: UITextLayoutDirection, extending: Bool) {
+        let selection = state.selection
+        guard let head = wordTarget(from: ProseTextPosition(selection.head), direction: direction) else {
+            // No further word boundary (already at the document edge): take the
+            // single geometric step so the key never feels dead.
+            moveCaret(direction, extending: extending)
+            return
+        }
+        selectedTextRange = ProseTextRange(anchor: extending ? selection.anchor : head.position, head: head.position)
+        scrollCaretToVisible()
+    }
+
+    /// The Position Option+Arrow targets. The system tokenizer reports a
+    /// boundary at every word edge — both starts and ends — so a single hop
+    /// would stop on the near edge of the gap between words. UITextView instead
+    /// jumps over it: rightward to the next word *end*, and leftward to the
+    /// previous word *start*. Those far edges are exactly the ones the
+    /// tokenizer flags as a boundary in the travel direction (verified on the
+    /// simulator: a word end answers `.forward`, a word start answers
+    /// `.backward`), so walk boundaries until one does.
+    private func wordTarget(from position: ProseTextPosition, direction: UITextLayoutDirection) -> ProseTextPosition? {
+        let step: UITextStorageDirection = direction == .left ? .backward : .forward
+        var current: UITextPosition = position
+        var advanced = false
+        while let next = tokenizer.position(from: current, toBoundary: .word, inDirection: .storage(step)) {
+            current = next
+            advanced = true
+            if tokenizer.isPosition(next, atBoundary: .word, inDirection: .storage(step)) {
+                return next as? ProseTextPosition
+            }
+        }
+        // Boundaries ran out before a word edge (e.g. trailing whitespace):
+        // settle at the furthest one reached, which is the document edge.
+        return advanced ? current as? ProseTextPosition : nil
     }
 }
 
