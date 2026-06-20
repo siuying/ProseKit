@@ -240,6 +240,30 @@ final class ProseViewTests: XCTestCase {
         XCTAssertEqual(selection.head, 2)
     }
 
+    // Cut collapses the selection programmatically, so — like paste — the input
+    // delegate must be told the selection changed. Otherwise the system
+    // selection-display chrome keeps drawing the old highlight over text that
+    // is no longer there.
+    func testCutNotifiesInputDelegateSoTheSelectionHighlightClears() throws {
+        let view = makeView(Document(.doc([.paragraph([.text("hello world")])])))
+        let pasteboard = UIPasteboard.withUniqueName()
+        view.pasteboard = pasteboard
+
+        // Select "hello " (positions 2..<8).
+        view.selectedTextRange = ProseTextRange(anchor: 2, head: 8)
+        let spy = InputDelegateSpy()
+        view.inputDelegate = spy
+
+        view.cut(nil)
+
+        XCTAssertEqual(spy.events.first, .selectionWillChange,
+                       "cut opens with selectionWillChange so the system tracks the collapse")
+        XCTAssertEqual(spy.events.last, .selectionDidChange,
+                       "cut closes with selectionDidChange so the stale highlight is cleared")
+        let selection = view.selectedTextRange as! ProseTextRange
+        XCTAssertTrue(selection.isEmpty, "the selection collapses, leaving no range to highlight")
+    }
+
     func testPasteReplacesSelectionWithPasteboardText() throws {
         let view = makeView(Document(.doc([.paragraph([.text("hello world")])])))
         let pasteboard = UIPasteboard.withUniqueName()

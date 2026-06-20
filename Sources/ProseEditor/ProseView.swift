@@ -373,9 +373,22 @@ import UIKit
     func runCommand(_ command: Command) {
         // A command that didn't dispatch leaves a stale lastTransaction;
         // its dirty rect repaints an already-clean region, never too little.
+        let selectionBefore = state.selection
         inputDelegate?.selectionWillChange(self)
         performEdit { _ = try command.run(in: &state) }
-        refreshSelectionDisplayGeometry()
+        // Block formatting (heading/list/align) keeps the *same* selection range
+        // but reflows the glyphs under it, so UIKit — which treats an unchanged
+        // range as nothing to re-measure — must be forced to refresh the
+        // selection geometry. A command that *moves* the caret (e.g. splitBlock)
+        // does not: the range change UIKit observes via selectionDidChange
+        // refreshes it on the cheap path keyboard caret moves take. Forcing it
+        // there too lagged ~1s when the command ran inside an input transaction
+        // (e.g. splitBlock per newline during a multi-line paste); see
+        // docs/research/2026-06-14-live-keyboard-responder-performance.md
+        // finding 1 and performEditMenuEdit.
+        if state.selection == selectionBefore {
+            refreshSelectionDisplayGeometry()
+        }
         inputDelegate?.selectionDidChange(self)
     }
 
@@ -523,7 +536,7 @@ import UIKit
     public override func cut(_ sender: Any?) {
         guard let selectedTextRange, !selectedTextRange.isEmpty else { return }
         copy(sender)
-        replace(selectedTextRange, withText: "")
+        performEditMenuEdit { replace(selectedTextRange, withText: "") }
     }
 
     public override func paste(_ sender: Any?) {
@@ -534,13 +547,27 @@ import UIKit
             runCommand(Commands.setLink(href: href))
             return
         }
-        // Paste is programmatic: unlike typed text the system did not drive the
-        // insertion, so it must be told the selection moved to the end of the
-        // pasted run — otherwise the caret chrome lags behind state.selection.
-        // (insertText's performEdit only brackets the text change.)
+        performEditMenuEdit { insertText(text) }
+    }
+
+    /// Runs a programmatic edit-menu edit (cut/paste) that moves the selection
+    /// and tells the input delegate it moved. Typed text gets this for free —
+    /// UIKit drives the insertion and updates the caret/selection display
+    /// itself — but an edit-menu action does not, so `insertText`'s
+    /// `performEdit` (which only brackets the text change) would leave the
+    /// caret, or after a cut the old selection highlight, stranded where the
+    /// removed text used to be.
+    ///
+    /// The delegate notifications alone are enough: UIKit re-queries the
+    /// selection geometry off the back of them, the same cheap path keyboard
+    /// caret moves take. Forcing `setNeedsSelectionUpdate()` here instead made
+    /// paste lag ~1s — the forced selection-display work tangles with SwiftUI
+    /// async rendering inside the input transaction (see
+    /// docs/research/2026-06-14-live-keyboard-responder-performance.md, finding
+    /// 1). Let UIKit schedule the display update.
+    private func performEditMenuEdit(_ edit: () -> Void) {
         inputDelegate?.selectionWillChange(self)
-        insertText(text)
-        refreshSelectionDisplayGeometry()
+        edit()
         inputDelegate?.selectionDidChange(self)
     }
 
