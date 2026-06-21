@@ -11,12 +11,24 @@ let package = Package(
     products: [
         .library(name: "ProseModel", targets: ["ProseModel"]),
         .library(name: "ProseEditor", targets: ["ProseEditor"]),
+        .library(name: "ProseKitYjs", targets: ["ProseKitYjs"]),
+    ],
+    dependencies: [
+        // Local path for development; a release pins a siuying/SwiftYrs tag.
+        .package(path: "../SwiftYrs"),
     ],
     targets: [
         .target(name: "ProseModel"),
         .target(
             name: "ProseEditor",
             dependencies: ["ProseModel"]
+        ),
+        .target(
+            name: "ProseKitYjs",
+            dependencies: [
+                "ProseEditor",
+                .product(name: "SwiftYrs", package: "SwiftYrs"),
+            ]
         ),
         .testTarget(
             name: "ProseModelTests",
@@ -27,6 +39,15 @@ let package = Package(
             dependencies: ["ProseEditor", "ProseModel"],
             resources: [
                 .copy("Resources/last_question.txt")
+            ]
+        ),
+        .testTarget(
+            name: "ProseKitYjsTests",
+            dependencies: [
+                "ProseKitYjs",
+                "ProseEditor",
+                "ProseModel",
+                .product(name: "SwiftYrs", package: "SwiftYrs"),
             ]
         ),
     ]

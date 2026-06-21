@@ -7,19 +7,24 @@ public struct EditorState: Sendable {
     public private(set) var lastTransaction: AppliedTransaction?
     public private(set) var typingMarks: [Mark]
     public private(set) var history: EditorHistory
+    /// Monotonic count of applied Transactions. Every `dispatch` bumps it once,
+    /// so a caller can detect "a Transaction was applied" by a change in value.
+    public private(set) var revision: Int
 
     public init(
         document: Document,
         selection: TextSelection? = nil,
         lastTransaction: AppliedTransaction? = nil,
         typingMarks: [Mark] = [],
-        history: EditorHistory = EditorHistory()
+        history: EditorHistory = EditorHistory(),
+        revision: Int = 0
     ) {
         self.document = document
         self.selection = selection ?? TextSelection(anchor: document.endTextPosition, head: document.endTextPosition)
         self.lastTransaction = lastTransaction
         self.typingMarks = typingMarks
         self.history = history
+        self.revision = revision
     }
 
     public mutating func insertText(_ text: String) throws {
@@ -78,6 +83,7 @@ public struct EditorState: Sendable {
         document = applied.document
         selection = applied.selection
         lastTransaction = applied
+        revision &+= 1
         guard shouldRecord else { return }
         // Invert against the pre-edit document the steps were valid against.
         if let inverted = try? Self.invertedSteps(for: transaction.steps, against: beforeDocument) {

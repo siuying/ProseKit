@@ -5,3 +5,6 @@ build/
 Example/build/
 xcuserdata/
 node_modules/
+# Resolved from the local-path SwiftYrs dev dependency; machine-specific until
+# the release pins a siuying/SwiftYrs tag.
+Package.resolved
