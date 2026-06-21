@@ -16,9 +16,12 @@ public final class YBinding {
     private let doc: YDoc
     private let fragment: YXmlFragment
 
-    private let bindingOrigin = "prosekit-yjs-binding"
+    private enum Replica {
+        static let paragraphElementName = "paragraph"
+        static let bindingOrigin = "prosekit-yjs-binding"
+    }
 
-    private var observation: Observation?
+    private var fragmentObservation: Observation?
     /// SwiftYrs has no deep observation, and a text change inside
     /// `paragraph > text` is a deep change the fragment observer never sees. We
     /// also observe the inner `YXmlText` directly; its branch identity is stable
@@ -35,7 +38,7 @@ public final class YBinding {
 
     /// True while a deferred bind-and-reconcile for a remotely-created text node
     /// is already scheduled, so a burst of fragment events schedules it once.
-    private var pendingRemoteTextReconcile = false
+    private var isRemoteTextReconcileScheduled = false
 
     public init(core: EditorCore, doc: YDoc, fragmentName: String = defaultFragmentName) {
         precondition(!fragmentName.isEmpty, "fragmentName must be non-empty and match the peer's root name")
@@ -49,7 +52,7 @@ public final class YBinding {
         core.didApplyTransaction = { [weak self] applied in
             self?.handleLocalTransaction(applied)
         }
-        observation = try? fragment.observe { event in
+        fragmentObservation = try? fragment.observe { event in
             guard case .shared = event else { return }
             // The observer fires synchronously inside a MainActor-confined
             // write/apply, so we are already on the MainActor here.
@@ -68,26 +71,26 @@ public final class YBinding {
             // A local write binds its own text observation in `encodeToReplica`.
             return
         }
-        guard textObservation == nil, !pendingRemoteTextReconcile else { return }
-        pendingRemoteTextReconcile = true
+        guard textObservation == nil, !isRemoteTextReconcileScheduled else { return }
+        isRemoteTextReconcileScheduled = true
         Task { @MainActor [weak self] in
-            self?.bindRemotelyCreatedText()
+            self?.reconcileRemotelyCreatedText()
         }
     }
 
     /// Runs after a remote apply completes: binds the inner text observation and
     /// pulls the just-created text into the `Document` via a `.remote` change.
-    private func bindRemotelyCreatedText() {
-        pendingRemoteTextReconcile = false
+    private func reconcileRemotelyCreatedText() {
+        isRemoteTextReconcileScheduled = false
         guard hasJoined else { return }
-        ensureTextObservation()
+        bindTextObservationIfAvailable()
         applyRemoteText(currentReplicaText())
     }
 
     /// Observes the inner text node once it exists (it may be created by a local
     /// edit or arrive in a remote update). Idempotent.
-    private func ensureTextObservation() {
-        guard textObservation == nil, let textNode = currentTextNode() else { return }
+    private func bindTextObservationIfAvailable() {
+        guard textObservation == nil, let textNode = currentEditableTextNode() else { return }
         textObservation = try? textNode.observe { event in
             guard case let .shared(shared) = event else { return }
             MainActor.assumeIsolated { [weak self] in
@@ -110,7 +113,7 @@ public final class YBinding {
     public func detach() {
         syncTask?.cancel()
         syncTask = nil
-        observation = nil
+        fragmentObservation = nil
         textObservation = nil
         core.didApplyTransaction = nil
         hasJoined = false
@@ -123,17 +126,17 @@ public final class YBinding {
         guard !hasJoined else { return }
         hasJoined = true
         let replicaText = currentReplicaText()
-        if replicaText.isEmpty {
-            // Seeding an empty document would write a competing empty paragraph
-            // that duplicates against a peer's first-paragraph creation. Leave the
-            // replica empty and adopt whichever peer creates the paragraph first.
-            if !core.document.plainText.isEmpty {
-                encodeToReplica(core.document.plainText)
-            }
-        } else {
+        let documentText = core.document.plainText
+        switch (replicaText.isEmpty, documentText.isEmpty) {
+        case (false, _):
             applyRemoteText(replicaText)
+        case (true, false):
+            encodeToReplica(documentText)
+        case (true, true):
+            // Leave Y structure-free so the first peer to type creates the paragraph.
+            break
         }
-        ensureTextObservation()
+        bindTextObservationIfAvailable()
     }
 
     // MARK: - Encoder (PM → Y)
@@ -147,7 +150,7 @@ public final class YBinding {
     private func encodeToReplica(_ text: String) {
         isApplyingLocalWrite = true
         defer { isApplyingLocalWrite = false }
-        try? doc.write(origin: bindingOrigin) { transaction in
+        try? doc.write(origin: Replica.bindingOrigin) { transaction in
             let paragraph = try paragraphElement(in: transaction)
             let textNode = try editableTextNode(in: paragraph, transaction: transaction)
             let current = try transaction.string(from: textNode)
@@ -160,7 +163,7 @@ public final class YBinding {
                 try transaction.insert(diff.inserted, into: textNode, at: UInt32(diff.prefix))
             }
         }
-        ensureTextObservation()
+        bindTextObservationIfAvailable()
     }
 
     private func paragraphElement(in transaction: YWriteTransaction) throws -> YXmlElement {
@@ -168,7 +171,7 @@ public final class YBinding {
            case let .element(element) = try transaction.child(at: 0, in: fragment) {
             return element
         }
-        return try transaction.insertElement(named: "paragraph", into: fragment, at: 0)
+        return try transaction.insertElement(named: Replica.paragraphElementName, into: fragment, at: 0)
     }
 
     private func editableTextNode(in paragraph: YXmlElement, transaction: YWriteTransaction) throws -> YXmlText {
@@ -232,18 +235,18 @@ public final class YBinding {
 
     private func currentReplicaText() -> String {
         (try? doc.read { transaction -> String in
-            guard let textNode = try currentTextNode(in: transaction) else { return "" }
+            guard let textNode = try currentEditableTextNode(in: transaction) else { return "" }
             return try transaction.string(from: textNode)
         }) ?? ""
     }
 
-    private func currentTextNode() -> YXmlText? {
+    private func currentEditableTextNode() -> YXmlText? {
         (try? doc.read { transaction in
-            try currentTextNode(in: transaction)
+            try currentEditableTextNode(in: transaction)
         }) ?? nil
     }
 
-    private func currentTextNode(in transaction: YReadTransaction) throws -> YXmlText? {
+    private func currentEditableTextNode(in transaction: YReadTransaction) throws -> YXmlText? {
         guard try transaction.childCount(of: fragment) > 0,
               case let .element(paragraph) = try transaction.child(at: 0, in: fragment),
               try transaction.childCount(of: paragraph) > 0,
