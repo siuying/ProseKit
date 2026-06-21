@@ -151,6 +151,66 @@ final class YBindingInteropTests: XCTestCase {
         return result
     }
 
+    // MARK: - Block types and attrs
+
+    func testRealYProsemirrorDecodesProseKitBlocks() throws {
+        let fixture = try requireFixture()
+        let core = EditorCore(document: Document(.doc([
+            .heading(level: 2, [.text("Title")]),
+            .paragraph([.text("body")]),
+        ])))
+        let doc = YDoc()
+        let binding = YBinding(core: core, doc: doc)
+        binding.join()
+
+        let update = try doc.encodeStateAsUpdateV1()
+        let file = makeTempFile()
+        try update.data.write(to: file)
+
+        let blocks = Self.blocksFromJSON(try fixture.run("decodeJSON", file.path))
+        XCTAssertEqual(blocks.map(\.type), ["heading", "paragraph"])
+        XCTAssertEqual(blocks.first?.level, 2)
+        XCTAssertEqual(blocks.first?.text, "Title")
+        withExtendedLifetime(binding) {}
+    }
+
+    func testProseKitDecodesBlocksFromRealYProsemirror() throws {
+        let fixture = try requireFixture()
+        let json = #"""
+        {"type":"doc","content":[
+        {"type":"heading","attrs":{"level":3},"content":[{"type":"text","text":"Title"}]},
+        {"type":"paragraph","content":[{"type":"text","text":"body"}]}
+        ]}
+        """#
+        let jsonFile = makeTempFile()
+        try Data(json.utf8).write(to: jsonFile)
+        let outFile = makeTempFile()
+        try fixture.run("encodeJSON", jsonFile.path, outFile.path)
+
+        let doc = YDoc()
+        try doc.apply(.v1(Data(contentsOf: outFile)))
+        let core = EditorCore(document: Document(.doc([.paragraph([])])))
+        let binding = YBinding(core: core, doc: doc)
+        binding.join()
+
+        XCTAssertEqual(core.document.root.content.map(\.type), ["heading", "paragraph"])
+        XCTAssertEqual(core.document.root.content[0].attrs["level"], .int(3))
+        XCTAssertEqual(core.document.plainText, "Titlebody")
+        withExtendedLifetime(binding) {}
+    }
+
+    private static func blocksFromJSON(_ json: String) -> [(type: String, level: Int?, text: String)] {
+        guard let data = json.data(using: .utf8),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let content = root["content"] as? [[String: Any]] else { return [] }
+        return content.map { block in
+            let type = block["type"] as? String ?? "?"
+            let level = (block["attrs"] as? [String: Any])?["level"] as? Int
+            let text = (block["content"] as? [[String: Any]])?.compactMap { $0["text"] as? String }.joined() ?? ""
+            return (type: type, level: level, text: text)
+        }
+    }
+
     // MARK: - Fixture harness
 
     private func replicaText(_ doc: YDoc) throws -> String {

@@ -957,3 +957,54 @@ public struct LiftStep: Step, Codable, Equatable, Sendable {
         return position
     }
 }
+
+/// Replaces a contiguous range of **top-level** blocks with arbitrary new block
+/// nodes — the general structural primitive a collaboration binding needs to
+/// apply a remote document state whose block types, attrs, or count changed and
+/// which the editor's narrower Steps cannot express. Flat documents only (the
+/// top-level `replacingBlocks`); the nested, path-keyed variant is a later slice.
+///
+/// `from` (the first replaced block's opening Position) and `removedSize` (the
+/// total node size removed) are captured at construction so `map` stays pure,
+/// mirroring `ReplaceStep`'s position algebra in block space.
+public struct ReplaceBlocksStep: Step, Codable, Equatable, Sendable {
+    public var blockRange: Range<Int>
+    public var blocks: [Node]
+    public var from: Position
+    public var removedSize: Int
+
+    public init(blockRange: Range<Int>, blocks: [Node], from: Position, removedSize: Int) {
+        self.blockRange = blockRange
+        self.blocks = blocks
+        self.from = from
+        self.removedSize = removedSize
+    }
+
+    private var insertedSize: Int {
+        blocks.reduce(0) { $0 + $1.nodeSize }
+    }
+
+    public func apply(to document: Document) throws -> StepApplication {
+        StepApplication(
+            document: document.replacingBlocks(in: blockRange, with: blocks),
+            changedRange: from..<max(from + insertedSize, from + 1)
+        )
+    }
+
+    public func inverted(in document: Document) throws -> any Step {
+        let original = Array(document.root.content[blockRange])
+        return ReplaceBlocksStep(
+            blockRange: blockRange.lowerBound..<(blockRange.lowerBound + blocks.count),
+            blocks: original,
+            from: from,
+            removedSize: insertedSize
+        )
+    }
+
+    public func map(_ position: Position) -> Position {
+        let to = from + removedSize
+        if position <= from { return position }
+        if position >= to { return position + insertedSize - removedSize }
+        return from
+    }
+}
