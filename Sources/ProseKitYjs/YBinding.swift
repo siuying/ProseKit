@@ -33,6 +33,10 @@ public final class YBinding {
     /// Gates the encoder/decoder until the provider's first sync completes.
     private var hasJoined = false
 
+    /// True while a deferred bind-and-reconcile for a remotely-created text node
+    /// is already scheduled, so a burst of fragment events schedules it once.
+    private var pendingRemoteTextReconcile = false
+
     public init(core: EditorCore, doc: YDoc, fragmentName: String = defaultFragmentName) {
         precondition(!fragmentName.isEmpty, "fragmentName must be non-empty and match the peer's root name")
         self.core = core
@@ -48,14 +52,36 @@ public final class YBinding {
         observation = try? fragment.observe { event in
             guard case .shared = event else { return }
             // The observer fires synchronously inside a MainActor-confined
-            // write/apply, so we are already on the MainActor here. We cannot
-            // open a read transaction here (the apply's write txn is still live),
-            // so we only (re)bind the inner text observation; its delta carries
-            // the actual text change.
+            // write/apply, so we are already on the MainActor here.
             MainActor.assumeIsolated { [weak self] in
-                self?.ensureTextObservation()
+                self?.handleFragmentChange()
             }
         }
+    }
+
+    /// A remote update may have just created the first `paragraph > text`. We
+    /// cannot read structure here (the apply's write txn still holds the lock),
+    /// so once the inner text node exists we defer the bind + reconcile until the
+    /// transaction releases its lock.
+    private func handleFragmentChange() {
+        guard hasJoined, !isApplyingLocalWrite else {
+            // A local write binds its own text observation in `encodeToReplica`.
+            return
+        }
+        guard textObservation == nil, !pendingRemoteTextReconcile else { return }
+        pendingRemoteTextReconcile = true
+        Task { @MainActor [weak self] in
+            self?.bindRemotelyCreatedText()
+        }
+    }
+
+    /// Runs after a remote apply completes: binds the inner text observation and
+    /// pulls the just-created text into the `Document` via a `.remote` change.
+    private func bindRemotelyCreatedText() {
+        pendingRemoteTextReconcile = false
+        guard hasJoined else { return }
+        ensureTextObservation()
+        applyRemoteText(currentReplicaText())
     }
 
     /// Observes the inner text node once it exists (it may be created by a local
@@ -98,7 +124,12 @@ public final class YBinding {
         hasJoined = true
         let replicaText = currentReplicaText()
         if replicaText.isEmpty {
-            encodeToReplica(core.document.plainText)
+            // Seeding an empty document would write a competing empty paragraph
+            // that duplicates against a peer's first-paragraph creation. Leave the
+            // replica empty and adopt whichever peer creates the paragraph first.
+            if !core.document.plainText.isEmpty {
+                encodeToReplica(core.document.plainText)
+            }
         } else {
             applyRemoteText(replicaText)
         }

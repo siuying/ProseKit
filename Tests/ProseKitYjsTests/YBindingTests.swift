@@ -60,6 +60,15 @@ final class YBindingTests: XCTestCase {
         }
     }
 
+    private func waitForDocumentText(_ expected: String, in core: EditorCore) async {
+        for _ in 0..<10 {
+            if core.document.plainText == expected {
+                return
+            }
+            await Task.yield()
+        }
+    }
+
     private func textNode(in fragment: YXmlFragment, transaction: YReadTransaction) throws -> YXmlText? {
         guard try transaction.childCount(of: fragment) > 0,
               case let .element(paragraph) = try transaction.child(at: 0, in: fragment),
@@ -193,6 +202,41 @@ final class YBindingTests: XCTestCase {
 
         XCTAssertEqual(core.document.plainText, "XYworld")
         XCTAssertEqual(core.selection.head, 5) // still right after "w"
+    }
+
+    // MARK: - Remote creation after an empty join
+
+    func testRemoteCreationOfFirstParagraphAfterEmptyJoin() async throws {
+        // Peer B joins an empty replica with an empty document: nothing to seed.
+        let coreB = makeCore("")
+        let docB = YDoc()
+        let binding = YBinding(core: coreB, doc: docB)
+        binding.join()
+
+        // A peer creates the very first paragraph and its text, then syncs in.
+        let docA = YDoc()
+        try seedReplica(docA, "Hi")
+        try docB.apply(docA.encodeStateAsUpdateV1(from: docB.stateVector()))
+
+        // The structural read is blocked inside the apply, so the decode is
+        // deferred until the write lock releases.
+        await waitForDocumentText("Hi", in: coreB)
+        XCTAssertEqual(coreB.document.plainText, "Hi")
+        XCTAssertEqual(coreB.lastTransaction?.origin, .remote)
+    }
+
+    func testEmptyJoinDoesNotSeedCompetingParagraph() throws {
+        // An empty document joining an empty replica must not write a competing
+        // empty paragraph that would duplicate against a remote creation.
+        let coreB = makeCore("")
+        let docB = YDoc()
+        let binding = YBinding(core: coreB, doc: docB)
+
+        binding.join()
+
+        let fragment = try docB.xmlFragment(named: YBinding.defaultFragmentName)
+        let childCount = try docB.read { try $0.childCount(of: fragment) }
+        XCTAssertEqual(childCount, 0)
     }
 
     // MARK: - Two-peer convergence
