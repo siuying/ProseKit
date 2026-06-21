@@ -5,9 +5,7 @@ import SwiftYrs
 /// Binds an `EditorCore` to a Yjs `YXmlFragment`, converging a single plain-text
 /// paragraph (`doc > paragraph > text`) with a y-prosemirror peer.
 ///
-/// This is slice 1 (the tracer bullet): no marks, no block variety. It stands up
-/// the encoder (PM→Y), decoder (Y→PM), the Join gate, selection survival, and the
-/// origin/reentrancy loop-break that every later slice builds on.
+/// This is slice 1 (the tracer bullet): no marks, no block variety.
 @MainActor
 public final class YBinding {
     /// y-prosemirror's default root name. Tiptap defaults to `"default"`; both
@@ -16,11 +14,8 @@ public final class YBinding {
 
     private let core: EditorCore
     private let doc: YDoc
-    private let fragmentName: String
     private let fragment: YXmlFragment
 
-    /// Tags our own writes so the fragment observer can tell an echo of a local
-    /// write apart from a genuine remote change.
     private let bindingOrigin = "prosekit-yjs-binding"
 
     private var observation: Observation?
@@ -42,7 +37,6 @@ public final class YBinding {
         precondition(!fragmentName.isEmpty, "fragmentName must be non-empty and match the peer's root name")
         self.core = core
         self.doc = doc
-        self.fragmentName = fragmentName
         guard let fragment = try? doc.xmlFragment(named: fragmentName) else {
             preconditionFailure("YDoc could not vend an XML fragment named \(fragmentName)")
         }
@@ -124,7 +118,7 @@ public final class YBinding {
         defer { isApplyingLocalWrite = false }
         try? doc.write(origin: bindingOrigin) { transaction in
             let paragraph = try paragraphElement(in: transaction)
-            let textNode = try textNode(in: paragraph, transaction: transaction)
+            let textNode = try editableTextNode(in: paragraph, transaction: transaction)
             let current = try transaction.string(from: textNode)
             let diff = TextDiff(from: current, to: text)
             guard diff.hasChange else { return }
@@ -146,7 +140,7 @@ public final class YBinding {
         return try transaction.insertElement(named: "paragraph", into: fragment, at: 0)
     }
 
-    private func textNode(in paragraph: YXmlElement, transaction: YWriteTransaction) throws -> YXmlText {
+    private func editableTextNode(in paragraph: YXmlElement, transaction: YWriteTransaction) throws -> YXmlText {
         if try transaction.childCount(of: paragraph) > 0,
            case let .text(textNode) = try transaction.child(at: 0, in: paragraph) {
             return textNode
@@ -207,25 +201,24 @@ public final class YBinding {
 
     private func currentReplicaText() -> String {
         (try? doc.read { transaction -> String in
-            guard try transaction.childCount(of: fragment) > 0,
-                  case let .element(paragraph) = try transaction.child(at: 0, in: fragment),
-                  try transaction.childCount(of: paragraph) > 0,
-                  case let .text(textNode) = try transaction.child(at: 0, in: paragraph)
-            else { return "" }
+            guard let textNode = try currentTextNode(in: transaction) else { return "" }
             return try transaction.string(from: textNode)
         }) ?? ""
     }
 
     private func currentTextNode() -> YXmlText? {
-        let node = try? doc.read { transaction -> YXmlText? in
-            guard try transaction.childCount(of: fragment) > 0,
-                  case let .element(paragraph) = try transaction.child(at: 0, in: fragment),
-                  try transaction.childCount(of: paragraph) > 0,
-                  case let .text(textNode) = try transaction.child(at: 0, in: paragraph)
-            else { return nil }
-            return textNode
-        }
-        return node ?? nil
+        (try? doc.read { transaction in
+            try currentTextNode(in: transaction)
+        }) ?? nil
+    }
+
+    private func currentTextNode(in transaction: YReadTransaction) throws -> YXmlText? {
+        guard try transaction.childCount(of: fragment) > 0,
+              case let .element(paragraph) = try transaction.child(at: 0, in: fragment),
+              try transaction.childCount(of: paragraph) > 0,
+              case let .text(textNode) = try transaction.child(at: 0, in: paragraph)
+        else { return nil }
+        return textNode
     }
 }
 

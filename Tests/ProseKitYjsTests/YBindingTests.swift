@@ -18,11 +18,7 @@ final class YBindingTests: XCTestCase {
     private func replicaText(_ doc: YDoc) throws -> String {
         let fragment = try doc.xmlFragment(named: YBinding.defaultFragmentName)
         return try doc.read { transaction -> String in
-            guard try transaction.childCount(of: fragment) > 0,
-                  case let .element(paragraph) = try transaction.child(at: 0, in: fragment),
-                  try transaction.childCount(of: paragraph) > 0,
-                  case let .text(textNode) = try transaction.child(at: 0, in: paragraph)
-            else { return "" }
+            guard let textNode = try textNode(in: fragment, transaction: transaction) else { return "" }
             return try transaction.string(from: textNode)
         }
     }
@@ -43,8 +39,7 @@ final class YBindingTests: XCTestCase {
     private func remoteInsert(_ doc: YDoc, _ text: String, at index: UInt32) throws {
         let fragment = try doc.xmlFragment(named: YBinding.defaultFragmentName)
         try doc.write(origin: "remote-peer") { transaction in
-            guard case let .element(paragraph) = try transaction.child(at: 0, in: fragment),
-                  case let .text(textNode) = try transaction.child(at: 0, in: paragraph)
+            guard let textNode = try textNode(in: fragment, transaction: transaction)
             else { return XCTFail("expected paragraph > text") }
             try transaction.insert(text, into: textNode, at: index)
         }
@@ -54,6 +49,24 @@ final class YBindingTests: XCTestCase {
     private func sync(_ a: YDoc, _ b: YDoc) throws {
         try b.apply(a.encodeStateAsUpdateV1(from: b.stateVector()))
         try a.apply(b.encodeStateAsUpdateV1(from: a.stateVector()))
+    }
+
+    private func waitForReplicaText(_ expected: String, in doc: YDoc) async throws {
+        for _ in 0..<10 {
+            if try replicaText(doc) == expected {
+                return
+            }
+            await Task.yield()
+        }
+    }
+
+    private func textNode(in fragment: YXmlFragment, transaction: YReadTransaction) throws -> YXmlText? {
+        guard try transaction.childCount(of: fragment) > 0,
+              case let .element(paragraph) = try transaction.child(at: 0, in: fragment),
+              try transaction.childCount(of: paragraph) > 0,
+              case let .text(textNode) = try transaction.child(at: 0, in: paragraph)
+        else { return nil }
+        return textNode
     }
 
     // MARK: - Join
@@ -89,6 +102,31 @@ final class YBindingTests: XCTestCase {
         binding.join()
 
         XCTAssertEqual(try replicaText(doc), "a")
+    }
+
+    func testAttachJoinsWhenProviderSyncs() async throws {
+        let core = makeCore("hello")
+        let doc = YDoc()
+        let binding = YBinding(core: core, doc: doc)
+        let syncedSignal = AsyncStream<Bool>.makeStream()
+
+        binding.attach(syncedSignal: syncedSignal.stream)
+        syncedSignal.continuation.yield(true)
+        try await waitForReplicaText("hello", in: doc)
+
+        XCTAssertEqual(try replicaText(doc), "hello")
+    }
+
+    func testDetachStopsLocalEncoding() throws {
+        let core = makeCore("hello")
+        let doc = YDoc()
+        let binding = YBinding(core: core, doc: doc)
+        binding.join()
+        binding.detach()
+
+        try core.insertText("!")
+
+        XCTAssertEqual(try replicaText(doc), "hello")
     }
 
     // MARK: - Encode (PM → Y)
