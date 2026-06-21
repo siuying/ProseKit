@@ -39,8 +39,10 @@ final class YBindingTests: XCTestCase {
     private func remoteInsert(_ doc: YDoc, _ text: String, at index: UInt32) throws {
         let fragment = try doc.xmlFragment(named: YBinding.defaultFragmentName)
         try doc.write(origin: "remote-peer") { transaction in
-            guard let textNode = try textNode(in: fragment, transaction: transaction)
-            else { return XCTFail("expected paragraph > text") }
+            let textNode = try XCTUnwrap(
+                textNode(in: fragment, transaction: transaction),
+                "expected paragraph > text"
+            )
             try transaction.insert(text, into: textNode, at: index)
         }
     }
@@ -154,9 +156,11 @@ final class YBindingTests: XCTestCase {
     func testLocalEditBeforeJoinDoesNotEncode() throws {
         let core = makeCore("")
         let doc = YDoc()
-        _ = YBinding(core: core, doc: doc)
+        let binding = YBinding(core: core, doc: doc)
 
-        try core.insertText("hi")
+        try withExtendedLifetime(binding) {
+            try core.insertText("hi")
+        }
 
         XCTAssertEqual(try replicaText(doc), "")
     }

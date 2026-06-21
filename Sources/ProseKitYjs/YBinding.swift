@@ -19,6 +19,42 @@ public final class YBinding {
     private enum Replica {
         static let paragraphElementName = "paragraph"
         static let bindingOrigin = "prosekit-yjs-binding"
+
+        static func plainText(in doc: YDoc, fragment: YXmlFragment) throws -> String {
+            try doc.read { transaction -> String in
+                guard let textNode = try textNode(in: fragment, transaction: transaction) else { return "" }
+                return try transaction.string(from: textNode)
+            }
+        }
+
+        static func textNode(in fragment: YXmlFragment, transaction: YReadTransaction) throws -> YXmlText? {
+            guard try transaction.childCount(of: fragment) > 0,
+                  case let .element(paragraph) = try transaction.child(at: 0, in: fragment)
+            else { return nil }
+            return try textNode(in: paragraph, transaction: transaction)
+        }
+
+        static func ensureParagraph(in fragment: YXmlFragment, transaction: YWriteTransaction) throws -> YXmlElement {
+            if try transaction.childCount(of: fragment) > 0,
+               case let .element(paragraph) = try transaction.child(at: 0, in: fragment) {
+                return paragraph
+            }
+            return try transaction.insertElement(named: paragraphElementName, into: fragment, at: 0)
+        }
+
+        static func ensureTextNode(in paragraph: YXmlElement, transaction: YWriteTransaction) throws -> YXmlText {
+            if let textNode = try textNode(in: paragraph, transaction: transaction) {
+                return textNode
+            }
+            return try transaction.insertText(into: paragraph, at: 0)
+        }
+
+        private static func textNode(in paragraph: YXmlElement, transaction: YReadTransaction) throws -> YXmlText? {
+            guard try transaction.childCount(of: paragraph) > 0,
+                  case let .text(textNode) = try transaction.child(at: 0, in: paragraph)
+            else { return nil }
+            return textNode
+        }
     }
 
     private var fragmentObservation: Observation?
@@ -151,8 +187,8 @@ public final class YBinding {
         isApplyingLocalWrite = true
         defer { isApplyingLocalWrite = false }
         try? doc.write(origin: Replica.bindingOrigin) { transaction in
-            let paragraph = try paragraphElement(in: transaction)
-            let textNode = try editableTextNode(in: paragraph, transaction: transaction)
+            let paragraph = try Replica.ensureParagraph(in: fragment, transaction: transaction)
+            let textNode = try Replica.ensureTextNode(in: paragraph, transaction: transaction)
             let current = try transaction.string(from: textNode)
             let diff = TextDiff(from: current, to: text)
             guard diff.hasChange else { return }
@@ -164,22 +200,6 @@ public final class YBinding {
             }
         }
         bindTextObservationIfAvailable()
-    }
-
-    private func paragraphElement(in transaction: YWriteTransaction) throws -> YXmlElement {
-        if try transaction.childCount(of: fragment) > 0,
-           case let .element(element) = try transaction.child(at: 0, in: fragment) {
-            return element
-        }
-        return try transaction.insertElement(named: Replica.paragraphElementName, into: fragment, at: 0)
-    }
-
-    private func editableTextNode(in paragraph: YXmlElement, transaction: YWriteTransaction) throws -> YXmlText {
-        if try transaction.childCount(of: paragraph) > 0,
-           case let .text(textNode) = try transaction.child(at: 0, in: paragraph) {
-            return textNode
-        }
-        return try transaction.insertText(into: paragraph, at: 0)
     }
 
     // MARK: - Decoder (Y → PM)
@@ -234,25 +254,13 @@ public final class YBinding {
     }
 
     private func currentReplicaText() -> String {
-        (try? doc.read { transaction -> String in
-            guard let textNode = try currentEditableTextNode(in: transaction) else { return "" }
-            return try transaction.string(from: textNode)
-        }) ?? ""
+        (try? Replica.plainText(in: doc, fragment: fragment)) ?? ""
     }
 
     private func currentEditableTextNode() -> YXmlText? {
         (try? doc.read { transaction in
-            try currentEditableTextNode(in: transaction)
+            try Replica.textNode(in: fragment, transaction: transaction)
         }) ?? nil
-    }
-
-    private func currentEditableTextNode(in transaction: YReadTransaction) throws -> YXmlText? {
-        guard try transaction.childCount(of: fragment) > 0,
-              case let .element(paragraph) = try transaction.child(at: 0, in: fragment),
-              try transaction.childCount(of: paragraph) > 0,
-              case let .text(textNode) = try transaction.child(at: 0, in: paragraph)
-        else { return nil }
-        return textNode
     }
 }
 
