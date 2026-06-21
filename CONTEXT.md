@@ -1,8 +1,12 @@
 # ProseKit
 
 A native iOS rich-text editor built on a custom CoreText layout engine over a
-ProseMirror-style document model. The document tree is the structural authority;
-the rendered layout is a projection of it, never the other way around.
+ProseMirror-style document model. The document tree is the authority the layout
+projects from; the rendered layout is a projection of it, never the other way
+around. When collaboration is active a shared CRDT replica becomes the
+*convergence* authority across peers: the binding keeps it equal to the Document,
+and on divergence the replica reconciles into the Document via a `remote`-Origin
+Transaction (see **Convergence Authority** under Collaboration).
 
 ## Language
 
@@ -89,6 +93,10 @@ _Avoid_: undo manager (that's the system bridge, not the record), undo stack
 A **Node** whose type the editor doesn't understand but preserves: rendered as
 a placeholder, selected and deleted only as a whole, and exported byte-faithful
 to how it arrived. The guarantee that unsupported content survives a round trip.
+Under collaboration this sharpens from a rendering nicety into a *convergence*
+requirement: if the **Binding** drops an unrecognized type from the **Shared
+Replica**, it deletes that content for *every* peer, not just locally — so opaque
+round-tripping is mandatory wherever the replica is the **Convergence Authority**.
 _Avoid_: unknown node (that's its cause, not its behavior), unsupported content
 (that's the rendering)
 
@@ -123,6 +131,67 @@ A pure function `(state, dispatch?) -> Bool` that, given the editor state, optio
 produces and dispatches a **Transaction**. Commands are how intents (toggle bold,
 split block) are expressed and composed.
 _Avoid_: action, step (a Command produces Steps), handler
+
+### Collaboration
+
+**Convergence Authority**:
+The shared CRDT replica that all peers' edits flow into and that, by CRDT merge,
+is the single state every peer agrees on. It does not displace the **Document** as
+the layout-projection authority; the two are kept equal by the binding, and on
+divergence the replica wins and reconciles into the Document through a
+`remote`-**Origin** **Transaction**. Active only in collaboration.
+_Avoid_: source of truth (ambiguous — the Document is still what layout reads),
+server, master copy
+
+**Shared Replica**:
+The Yjs document that is the **Convergence Authority**. Its structure is *not* a
+free choice: ProseKit must encode the **Document** into it exactly as
+`y-prosemirror` does — a top-level XML fragment, **Block Nodes** as XML elements
+named by their **Schema** type, **Attrs** as element attributes, and text as XML
+text whose **Marks** are formatting attributes. This makes the y-prosemirror XML
+encoding a binding *contract* a ProseKit peer and a JS Tiptap peer both implement,
+proven by **Interop Fixtures**. Distinct from Tiptap-JSON round-trip ([ADR 0003]):
+JSON is a load/export format, the Shared Replica is live convergence. The encoding
+target is y-prosemirror **v1.x** (classic `updateYFragment`); newer
+`y-attributed-*` formatting from richer JS peers is preserved opaquely, not
+interpreted.
+_Avoid_: the document JSON, Tiptap export, snapshot
+
+**Binding**:
+The component that keeps the **Document** and the **Shared Replica** equal in both
+directions. Local **Transaction**s diff into the replica (matched subtrees mutated
+in place, never recreated, to preserve concurrent remote edits); remote replica
+changes translate into `remote`-**Origin** **Transaction**s of targeted **Step**s.
+It maintains a position-keyed **Node** ⇄ Y-type correspondence carried across each
+Transaction's **Mapping**, re-diffing only the **Changed Range**. It owns the
+**Shared Replica** on the editor's actor (MainActor) — the single serialization
+owner the CRDT handle requires — and tags its own writes with an origin so the
+replica observer skips them, breaking the echo loop.
+_Avoid_: sync engine, adapter, provider (a **Provider** moves bytes between peers;
+the Binding maps between the two in-process representations)
+
+**Join**:
+A peer attaching to a collaborative document. Seeding is decided only *after* the
+**Provider** signals initial sync: an empty **Shared Replica** is seeded from the
+current **Document**; a non-empty replica replaces the Document via a
+`remote`-**Origin** **Transaction**. A Document handed to the editor is therefore
+discarded when joining a populated replica — that is collaborative semantics, not
+data loss; seed content belongs to *creating* a document, not *joining* one.
+_Avoid_: load, open, connect (connecting is the Provider's job; the Join is the
+seeding decision that follows the synced signal)
+
+**Decoration**:
+A piece of presentation layered over the **Document** without being part of it:
+an inline style range, a node highlight, or a positioned widget. Decorations are
+held in a set, mapped across each **Transaction**'s **Mapping**, and painted over
+the **Canvas** in content coordinates — never written into the Document, so they
+never touch convergence. The first client is the remote peer carets/highlights of
+collaboration (sourced from awareness via **YRelativePosition**); later clients
+(search highlights, spellcheck) reuse the same engine.
+_Not yet built_: ProseKit has no decoration engine today. It is its own track,
+sequenced *after* document convergence — convergence never depends on it.
+_Avoid_: annotation, overlay (the Selection Layer is also an overlay; a Decoration
+is model-positioned presentation), nodeView
 
 ### Layout
 
@@ -159,6 +228,7 @@ two platform realizations: on iOS it *is* the system (`UITextInteraction`
 draws caret, handles, loupe, menu); on macOS it is an editor-owned overlay
 that draws caret and highlight itself, since AppKit's text-input protocol
 draws no chrome. Reads geometry in content coordinates like everything else;
-the **Canvas** stays authority-free on both platforms.
+the **Canvas** stays authority-free on both platforms. Renders only the *local*
+Selection; remote peers' carets are **Decoration**s, not Selection Layer chrome.
 _Avoid_: caret view, cursor layer, selection view (it is the whole chrome,
 not one piece)
