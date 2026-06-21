@@ -35,6 +35,9 @@ const schema = new Schema({
       attrs: { level: { default: 1 }, textAlign: { default: null } },
       toDOM: (node) => [`h${node.attrs.level}`, 0],
     },
+    bulletList: { group: "block", content: "listItem+", toDOM: () => ["ul", 0] },
+    orderedList: { group: "block", content: "listItem+", attrs: { start: { default: 1 } }, toDOM: () => ["ol", 0] },
+    listItem: { content: "paragraph+", toDOM: () => ["li", 0] },
     text: {},
   },
   marks: {

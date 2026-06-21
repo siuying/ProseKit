@@ -211,6 +211,60 @@ final class YBindingInteropTests: XCTestCase {
         }
     }
 
+    // MARK: - Nesting / lists
+
+    func testRealYProsemirrorDecodesProseKitNestedList() throws {
+        let fixture = try requireFixture()
+        let core = EditorCore(document: Document(.doc([
+            .bulletList([
+                .listItem([.paragraph([.text("one")])]),
+                .listItem([.paragraph([.text("two")])]),
+            ]),
+        ])))
+        let doc = YDoc()
+        let binding = YBinding(core: core, doc: doc)
+        binding.join()
+
+        let update = try doc.encodeStateAsUpdateV1()
+        let file = makeTempFile()
+        try update.data.write(to: file)
+
+        let json = try fixture.run("decodeJSON", file.path)
+        // Compare against the JS peer's own JSON for the same document.
+        XCTAssertTrue(json.contains("\"bulletList\""))
+        XCTAssertTrue(json.contains("\"listItem\""))
+        XCTAssertTrue(json.contains("\"one\"") && json.contains("\"two\""))
+        withExtendedLifetime(binding) {}
+    }
+
+    func testProseKitDecodesNestedListFromRealYProsemirror() throws {
+        let fixture = try requireFixture()
+        let json = #"""
+        {"type":"doc","content":[{"type":"bulletList","content":[
+        {"type":"listItem","content":[{"type":"paragraph","content":[{"type":"text","text":"one"}]}]},
+        {"type":"listItem","content":[{"type":"paragraph","content":[{"type":"text","text":"two"}]}]}
+        ]}]}
+        """#
+        let jsonFile = makeTempFile()
+        try Data(json.utf8).write(to: jsonFile)
+        let outFile = makeTempFile()
+        try fixture.run("encodeJSON", jsonFile.path, outFile.path)
+
+        let doc = YDoc()
+        try doc.apply(.v1(Data(contentsOf: outFile)))
+        let core = EditorCore(document: Document(.doc([.paragraph([])])))
+        let binding = YBinding(core: core, doc: doc)
+        binding.join()
+
+        XCTAssertEqual(core.document.root.content, [
+            .bulletList([
+                .listItem([.paragraph([.text("one")])]),
+                .listItem([.paragraph([.text("two")])]),
+            ]),
+        ])
+        withExtendedLifetime(binding) {}
+    }
+
     // MARK: - Fixture harness
 
     private func replicaText(_ doc: YDoc) throws -> String {
