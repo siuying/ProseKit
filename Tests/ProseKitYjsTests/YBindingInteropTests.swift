@@ -265,6 +265,48 @@ final class YBindingInteropTests: XCTestCase {
         withExtendedLifetime(binding) {}
     }
 
+    // MARK: - Opaque round-trip (#70, convergence-critical)
+
+    func testUnknownNodeSurvivesProseKitEditAndSync() throws {
+        let fixture = try requireFixture()
+        // The JS peer authors a node ProseKit's Schema does not know (an `image`
+        // atom) between two paragraphs.
+        let json = #"""
+        {"type":"doc","content":[
+        {"type":"paragraph","content":[{"type":"text","text":"a"}]},
+        {"type":"image","attrs":{"src":"cat.png"}},
+        {"type":"paragraph","content":[{"type":"text","text":"b"}]}
+        ]}
+        """#
+        let jsonFile = makeTempFile()
+        try Data(json.utf8).write(to: jsonFile)
+        let updateFile = makeTempFile()
+        try fixture.run("encodeJSON", jsonFile.path, updateFile.path)
+
+        let doc = YDoc()
+        try doc.apply(.v1(Data(contentsOf: updateFile)))
+        let core = EditorCore(document: Document(.doc([.paragraph([])])))
+        let binding = YBinding(core: core, doc: doc)
+        binding.join()
+        XCTAssertEqual(core.document.root.content.map(\.type), ["paragraph", "image", "paragraph"])
+
+        // ProseKit edits a neighbouring paragraph — the unknown node must survive.
+        let end = (core.document.position(ofNodeAtPath: [0]) ?? 0) + 1 + 1
+        core.setSelection(TextSelection(anchor: end, head: end))
+        try core.insertText("Z")
+
+        let mergedFile = makeTempFile()
+        try doc.encodeStateAsUpdateV1().data.write(to: mergedFile)
+        let decoded = try fixture.run("decodeJSON", mergedFile.path)
+
+        // The JS peer still sees the image (with its src) and ProseKit's edit.
+        XCTAssertTrue(decoded.contains("\"image\""), decoded)
+        XCTAssertTrue(decoded.contains("\"cat.png\""), decoded)
+        XCTAssertTrue(decoded.contains("\"aZ\""), decoded)
+        XCTAssertTrue(decoded.contains("\"b\""), decoded)
+        withExtendedLifetime(binding) {}
+    }
+
     // MARK: - Fixture harness
 
     private func replicaText(_ doc: YDoc) throws -> String {

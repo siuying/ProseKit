@@ -18,7 +18,13 @@ public enum EditorEditAction {
     /// Fires once after each applied Transaction, after `state` is updated.
     public var didApplyTransaction: ((AppliedTransaction) -> Void)?
 
+    /// The Schema this editor understands. Unknown node/mark types still load
+    /// (ADR 0006) but a collaboration binding consults this to preserve them
+    /// opaquely rather than reinterpreting them.
+    public let schema: Schema
+
     public init(document: Document, schema: Schema = .slice1) {
+        self.schema = schema
         self.state = EditorState(document: document)
         self.layoutStore = IncrementalLayoutStore(schema: schema, width: 0)
     }
