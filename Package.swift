@@ -14,8 +14,7 @@ let package = Package(
         .library(name: "ProseKitYjs", targets: ["ProseKitYjs"]),
     ],
     dependencies: [
-        // Local path for development; a release pins a siuying/SwiftYrs tag.
-        .package(path: "../SwiftYrs"),
+        .package(url: "https://github.com/siuying/SwiftYrs", from: "0.1.0"),
     ],
     targets: [
         .target(name: "ProseModel"),
