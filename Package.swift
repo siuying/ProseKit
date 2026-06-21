@@ -14,7 +14,9 @@ let package = Package(
         .library(name: "ProseKitYjs", targets: ["ProseKitYjs"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/siuying/SwiftYrs", from: "0.1.0"),
+        // Temporarily on the local checkout for the YXmlText inline-formatting API
+        // (siuying/SwiftYrs#98). Restore the pinned version once that merges.
+        .package(path: "../SwiftYrs"),
     ],
     targets: [
         .target(name: "ProseModel"),
