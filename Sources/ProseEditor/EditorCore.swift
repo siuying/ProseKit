@@ -15,11 +15,7 @@ public enum EditorEditAction {
     public private(set) var layoutBox: LayoutBox?
     public let geometryMapper = GeometryMapper()
 
-    /// Outbound collaboration seam: fires once per applied Transaction, after
-    /// `state` is updated, on every dispatch path (typing, command, undo/redo,
-    /// remote). A Yjs-agnostic Binding observes this to diff each edit out.
-    /// Kept as a synchronous callback (not an AsyncStream) so the Binding can
-    /// diff against the just-applied document on the same tick.
+    /// Fires once after each applied Transaction, after `state` is updated.
     public var didApplyTransaction: ((AppliedTransaction) -> Void)?
 
     public init(document: Document, schema: Schema = .slice1) {
@@ -53,9 +49,13 @@ public enum EditorEditAction {
         )
     }
 
-    /// Fire `didApplyTransaction` once iff a Transaction was applied since the
-    /// captured revision. The revision delta is the single source of truth for
-    /// "did something apply", so each public dispatch path notifies exactly once.
+    private func runAndNotifyIfTransactionApplied<T>(_ work: () throws -> T) rethrows -> T {
+        let revision = state.revision
+        let result = try work()
+        notifyIfApplied(since: revision)
+        return result
+    }
+
     private func notifyIfApplied(since revision: Int) {
         guard state.revision != revision, let applied = state.lastTransaction else { return }
         didApplyTransaction?(applied)
@@ -81,33 +81,28 @@ public enum EditorEditAction {
     }
 
     public func insertText(_ text: String) throws {
-        let revision = state.revision
-        try state.insertText(text)
-        notifyIfApplied(since: revision)
+        try runAndNotifyIfTransactionApplied {
+            try state.insertText(text)
+        }
     }
 
     public func deleteBackward() throws {
-        let revision = state.revision
-        try state.deleteBackward()
-        notifyIfApplied(since: revision)
+        try runAndNotifyIfTransactionApplied {
+            try state.deleteBackward()
+        }
     }
 
-    /// Inbound collaboration seam: apply a remote-origin Transaction. Skips
-    /// local history (the Transaction carries `.remote`, which the dispatch
-    /// seam already excludes from history) and relayouts the changed range.
-    /// Notifies `didApplyTransaction` with the `.remote` AppliedTransaction so
-    /// the Binding can tell its own write apart from a local edit and not echo
-    /// it back as a self-apply.
+    /// Applies a remote-origin Transaction without recording local history.
     public func applyRemote(_ transaction: Transaction) {
-        let revision = state.revision
         do {
-            try state.dispatch(transaction, recordsHistory: false)
+            try runAndNotifyIfTransactionApplied {
+                try state.dispatch(transaction, recordsHistory: false)
+                relayout(changedRange: state.lastTransaction?.changedRange)
+            }
         } catch {
             assertionFailure("applyRemote failed: \(error)")
             return
         }
-        relayout(changedRange: state.lastTransaction?.changedRange)
-        notifyIfApplied(since: revision)
     }
 
     public var canUndo: Bool { state.history.canUndo }
@@ -126,14 +121,14 @@ public enum EditorEditAction {
 
     @discardableResult
     public func undo() -> Bool {
-        let revision = state.revision
         do {
-            let ran = try state.undo()
-            if ran {
-                relayout(changedRange: state.lastTransaction?.changedRange)
+            return try runAndNotifyIfTransactionApplied {
+                let ran = try state.undo()
+                if ran {
+                    relayout(changedRange: state.lastTransaction?.changedRange)
+                }
+                return ran
             }
-            notifyIfApplied(since: revision)
-            return ran
         } catch {
             assertionFailure("undo failed: \(error)")
             return false
@@ -142,14 +137,14 @@ public enum EditorEditAction {
 
     @discardableResult
     public func redo() -> Bool {
-        let revision = state.revision
         do {
-            let ran = try state.redo()
-            if ran {
-                relayout(changedRange: state.lastTransaction?.changedRange)
+            return try runAndNotifyIfTransactionApplied {
+                let ran = try state.redo()
+                if ran {
+                    relayout(changedRange: state.lastTransaction?.changedRange)
+                }
+                return ran
             }
-            notifyIfApplied(since: revision)
-            return ran
         } catch {
             assertionFailure("redo failed: \(error)")
             return false
@@ -172,10 +167,9 @@ public enum EditorEditAction {
 
     @discardableResult
     public func dispatch(_ command: Command) throws -> Bool {
-        let revision = state.revision
-        let ran = try command.run(in: &state)
-        notifyIfApplied(since: revision)
-        return ran
+        try runAndNotifyIfTransactionApplied {
+            try command.run(in: &state)
+        }
     }
 
     public func caretRect(for position: Position) -> CGRect {

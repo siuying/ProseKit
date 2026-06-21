@@ -4,8 +4,6 @@ import ProseModel
 import SwiftYrs
 @testable import ProseKitYjs
 
-/// Proves the `ProseKitYjs` target builds and links SwiftYrs, and that it can
-/// reach the `EditorCore` collaboration seam it will drive in later slices.
 @MainActor
 final class ProseKitYjsTests: XCTestCase {
     func testLinksSwiftYrs() {
@@ -14,8 +12,6 @@ final class ProseKitYjsTests: XCTestCase {
     }
 
     func testCanObserveEditorCoreSeam() throws {
-        // The Binding (a later slice) drives convergence through this seam; the
-        // scaffold only proves it is reachable from ProseKitYjs.
         let core = EditorCore(document: Document(.doc([.paragraph([.text("hi")])])))
         core.setSelection(TextSelection(anchor: 4, head: 4))
 

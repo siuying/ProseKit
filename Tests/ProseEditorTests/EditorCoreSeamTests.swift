@@ -2,16 +2,21 @@ import XCTest
 @testable import ProseEditor
 @testable import ProseModel
 
-/// The Yjs-agnostic collaboration seam on `EditorCore`: an outbound
-/// `didApplyTransaction` that fires exactly once per applied Transaction across
-/// every dispatch path, and an inbound `applyRemote` that applies a
-/// remote-origin Transaction without touching local history.
 @MainActor
 final class EditorCoreSeamTests: XCTestCase {
     private func makeCore() -> EditorCore {
         let core = EditorCore(document: Document(.doc([.paragraph([.text("hi")])])))
         core.setSelection(TextSelection(anchor: 4, head: 4))
         return core
+    }
+
+    private func remoteInsertion(in core: EditorCore, text: String) -> Transaction {
+        let head = core.document.endTextPosition
+        return Transaction(
+            steps: [ReplaceStep(from: head, to: head, insertText: text)],
+            selection: TextSelection(anchor: head + text.count, head: head + text.count),
+            origin: .remote
+        )
     }
 
     func testDidApplyFiresOnceForLocalInsert() throws {
@@ -39,11 +44,11 @@ final class EditorCoreSeamTests: XCTestCase {
 
     func testDidApplyDoesNotFireForNoOpDeleteBackward() throws {
         let core = EditorCore(document: Document(.doc([.paragraph([.text("hi")])])))
-        core.setSelection(TextSelection(anchor: 2, head: 2)) // very start of text
+        core.setSelection(TextSelection(anchor: 2, head: 2))
         var count = 0
         core.didApplyTransaction = { _ in count += 1 }
 
-        try core.deleteBackward() // inert at the document start
+        try core.deleteBackward()
 
         XCTAssertEqual(count, 0)
     }
@@ -61,7 +66,6 @@ final class EditorCoreSeamTests: XCTestCase {
     }
 
     func testDidApplyDoesNotDoubleFireWhenRunDelegatesToDispatch() {
-        // run() forwards to dispatch(); only one notification must surface.
         let core = makeCore()
         var count = 0
         core.didApplyTransaction = { _ in count += 1 }
@@ -99,8 +103,6 @@ final class EditorCoreSeamTests: XCTestCase {
 
     func testApplyRemoteSetsRemoteOriginAndRecordsNoHistory() {
         let core = makeCore()
-        // A pre-existing local edit gives us an undo stack to prove the remote
-        // apply leaves it untouched.
         try? core.insertText("!")
         XCTAssertTrue(core.canUndo)
         let canUndoBefore = core.canUndo
@@ -109,19 +111,12 @@ final class EditorCoreSeamTests: XCTestCase {
         var applied: [AppliedTransaction] = []
         core.didApplyTransaction = { applied.append($0) }
 
-        let head = core.document.endTextPosition
-        let remote = Transaction(
-            steps: [ReplaceStep(from: head, to: head, insertText: "?")],
-            selection: TextSelection(anchor: head + 1, head: head + 1),
-            origin: .remote
-        )
-        core.applyRemote(remote)
+        core.applyRemote(remoteInsertion(in: core, text: "?"))
 
         XCTAssertEqual(core.document.plainText, "hi!?")
         XCTAssertEqual(core.lastTransaction?.origin, .remote)
         XCTAssertEqual(applied.count, 1)
         XCTAssertEqual(applied.first?.origin, .remote)
-        // No history entry recorded for a remote apply.
         XCTAssertEqual(core.canUndo, canUndoBefore)
         XCTAssertEqual(core.canRedo, canRedoBefore)
     }
@@ -131,13 +126,7 @@ final class EditorCoreSeamTests: XCTestCase {
         core.relayout(width: 320)
         XCTAssertNotNil(core.layoutBox)
 
-        let head = core.document.endTextPosition
-        let remote = Transaction(
-            steps: [ReplaceStep(from: head, to: head, insertText: " there")],
-            selection: TextSelection(anchor: head + 6, head: head + 6),
-            origin: .remote
-        )
-        core.applyRemote(remote)
+        core.applyRemote(remoteInsertion(in: core, text: " there"))
 
         XCTAssertEqual(core.document.plainText, "hi there")
         XCTAssertNotNil(core.layoutBox, "a remote apply relayouts the changed range")
