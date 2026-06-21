@@ -15,6 +15,9 @@ public enum EditorEditAction {
     public private(set) var layoutBox: LayoutBox?
     public let geometryMapper = GeometryMapper()
 
+    /// Fires once after each applied Transaction, after `state` is updated.
+    public var didApplyTransaction: ((AppliedTransaction) -> Void)?
+
     public init(document: Document, schema: Schema = .slice1) {
         self.state = EditorState(document: document)
         self.layoutStore = IncrementalLayoutStore(schema: schema, width: 0)
@@ -41,8 +44,21 @@ public enum EditorEditAction {
             selection: selection,
             lastTransaction: state.lastTransaction,
             typingMarks: state.typingMarks,
-            history: history
+            history: history,
+            revision: state.revision
         )
+    }
+
+    private func runAndNotifyIfTransactionApplied<T>(_ work: () throws -> T) rethrows -> T {
+        let revision = state.revision
+        let result = try work()
+        notifyIfApplied(since: revision)
+        return result
+    }
+
+    private func notifyIfApplied(since revision: Int) {
+        guard state.revision != revision, let applied = state.lastTransaction else { return }
+        didApplyTransaction?(applied)
     }
 
     @discardableResult
@@ -65,11 +81,28 @@ public enum EditorEditAction {
     }
 
     public func insertText(_ text: String) throws {
-        try state.insertText(text)
+        try runAndNotifyIfTransactionApplied {
+            try state.insertText(text)
+        }
     }
 
     public func deleteBackward() throws {
-        try state.deleteBackward()
+        try runAndNotifyIfTransactionApplied {
+            try state.deleteBackward()
+        }
+    }
+
+    /// Applies a remote-origin Transaction without recording local history.
+    public func applyRemote(_ transaction: Transaction) {
+        do {
+            try runAndNotifyIfTransactionApplied {
+                try state.dispatch(transaction, recordsHistory: false)
+                relayout(changedRange: state.lastTransaction?.changedRange)
+            }
+        } catch {
+            assertionFailure("applyRemote failed: \(error)")
+            return
+        }
     }
 
     public var canUndo: Bool { state.history.canUndo }
@@ -89,11 +122,13 @@ public enum EditorEditAction {
     @discardableResult
     public func undo() -> Bool {
         do {
-            let ran = try state.undo()
-            if ran {
-                relayout(changedRange: state.lastTransaction?.changedRange)
+            return try runAndNotifyIfTransactionApplied {
+                let ran = try state.undo()
+                if ran {
+                    relayout(changedRange: state.lastTransaction?.changedRange)
+                }
+                return ran
             }
-            return ran
         } catch {
             assertionFailure("undo failed: \(error)")
             return false
@@ -103,11 +138,13 @@ public enum EditorEditAction {
     @discardableResult
     public func redo() -> Bool {
         do {
-            let ran = try state.redo()
-            if ran {
-                relayout(changedRange: state.lastTransaction?.changedRange)
+            return try runAndNotifyIfTransactionApplied {
+                let ran = try state.redo()
+                if ran {
+                    relayout(changedRange: state.lastTransaction?.changedRange)
+                }
+                return ran
             }
-            return ran
         } catch {
             assertionFailure("redo failed: \(error)")
             return false
@@ -130,7 +167,9 @@ public enum EditorEditAction {
 
     @discardableResult
     public func dispatch(_ command: Command) throws -> Bool {
-        try command.run(in: &state)
+        try runAndNotifyIfTransactionApplied {
+            try command.run(in: &state)
+        }
     }
 
     public func caretRect(for position: Position) -> CGRect {
