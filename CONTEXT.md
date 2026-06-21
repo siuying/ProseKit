@@ -180,19 +180,6 @@ data loss; seed content belongs to *creating* a document, not *joining* one.
 _Avoid_: load, open, connect (connecting is the Provider's job; the Join is the
 seeding decision that follows the synced signal)
 
-**Decoration**:
-A piece of presentation layered over the **Document** without being part of it:
-an inline style range, a node highlight, or a positioned widget. Decorations are
-held in a set, mapped across each **Transaction**'s **Mapping**, and painted over
-the **Canvas** in content coordinates — never written into the Document, so they
-never touch convergence. The first client is the remote peer carets/highlights of
-collaboration (sourced from awareness via **YRelativePosition**); later clients
-(search highlights, spellcheck) reuse the same engine.
-_Not yet built_: ProseKit has no decoration engine today. It is its own track,
-sequenced *after* document convergence — convergence never depends on it.
-_Avoid_: annotation, overlay (the Selection Layer is also an overlay; a Decoration
-is model-positioned presentation), nodeView
-
 ### Layout
 
 **Layout Box**:
@@ -228,7 +215,11 @@ two platform realizations: on iOS it *is* the system (`UITextInteraction`
 draws caret, handles, loupe, menu); on macOS it is an editor-owned overlay
 that draws caret and highlight itself, since AppKit's text-input protocol
 draws no chrome. Reads geometry in content coordinates like everything else;
-the **Canvas** stays authority-free on both platforms. Renders only the *local*
-Selection; remote peers' carets are **Decoration**s, not Selection Layer chrome.
+the **Canvas** stays authority-free on both platforms. In collaboration it also
+renders each remote peer's caret and range highlight — sourced from awareness,
+anchored by **YRelativePosition**, colored and labeled per peer. Remote carets are
+editor-drawn overlays on *both* platforms (the system only ever knows the local
+caret). ProseKit has no general decoration system; remote carets are selection
+chrome, drawn through the same geometry mapper as the local Selection.
 _Avoid_: caret view, cursor layer, selection view (it is the whole chrome,
 not one piece)
