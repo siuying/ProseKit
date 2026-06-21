@@ -1,11 +1,16 @@
+import Foundation
 import ProseEditor
 import ProseModel
 import SwiftYrs
 
-/// Binds an `EditorCore` to a Yjs `YXmlFragment`, converging a single plain-text
-/// paragraph (`doc > paragraph > text`) with a y-prosemirror peer.
+/// Binds an `EditorCore` to a Yjs `YXmlFragment`, converging a single textblock
+/// (`doc > paragraph > text…`) with a y-prosemirror peer, including inline
+/// **Marks** (slice 2). Block variety and nesting are later slices.
 ///
-/// This is slice 1 (the tracer bullet): no marks, no block variety.
+/// Marks ride the wire as `YXmlText` delta formatting attributes
+/// (`marksToAttributes`). Because Yjs deep-change observers cannot carry
+/// object-valued attributes back to us, a remote change triggers a deferred
+/// full-replica reconcile rather than replaying the observed delta.
 @MainActor
 public final class YBinding {
     /// y-prosemirror's default root name. Tiptap defaults to `"default"`; both
@@ -19,13 +24,6 @@ public final class YBinding {
     private enum Replica {
         static let paragraphElementName = "paragraph"
         static let bindingOrigin = "prosekit-yjs-binding"
-
-        static func plainText(in doc: YDoc, fragment: YXmlFragment) throws -> String {
-            try doc.read { transaction -> String in
-                guard let textNode = try textNode(in: fragment, transaction: transaction) else { return "" }
-                return try transaction.string(from: textNode)
-            }
-        }
 
         static func textNode(in fragment: YXmlFragment, transaction: YReadTransaction) throws -> YXmlText? {
             guard try transaction.childCount(of: fragment) > 0,
@@ -58,23 +56,23 @@ public final class YBinding {
     }
 
     private var fragmentObservation: Observation?
-    /// SwiftYrs has no deep observation, and a text change inside
+    /// SwiftYrs has no deep observation, and a text/formatting change inside
     /// `paragraph > text` is a deep change the fragment observer never sees. We
     /// also observe the inner `YXmlText` directly; its branch identity is stable
     /// for the document's lifetime, so one observation suffices.
     private var textObservation: Observation?
     private var syncTask: Task<Void, Never>?
 
-    /// True while we are writing our own change into Y. The fragment observer
-    /// fires synchronously inside that write, so this guard breaks the loop.
+    /// True while we are writing our own change into Y. The fragment/text
+    /// observers fire synchronously inside that write, so this guard breaks the loop.
     private var isApplyingLocalWrite = false
 
     /// Gates the encoder/decoder until the provider's first sync completes.
     private var hasJoined = false
 
-    /// True while a deferred bind-and-reconcile for a remotely-created text node
-    /// is already scheduled, so a burst of fragment events schedules it once.
-    private var isRemoteTextReconcileScheduled = false
+    /// True while a deferred reconcile is already queued, so a burst of Y events
+    /// coalesces into one.
+    private var isReconcileScheduled = false
 
     public init(core: EditorCore, doc: YDoc, fragmentName: String = defaultFragmentName) {
         precondition(!fragmentName.isEmpty, "fragmentName must be non-empty and match the peer's root name")
@@ -93,44 +91,7 @@ public final class YBinding {
             // The observer fires synchronously inside a MainActor-confined
             // write/apply, so we are already on the MainActor here.
             MainActor.assumeIsolated { [weak self] in
-                self?.handleFragmentChange()
-            }
-        }
-    }
-
-    /// A remote update may have just created the first `paragraph > text`. We
-    /// cannot read structure here (the apply's write txn still holds the lock),
-    /// so once the inner text node exists we defer the bind + reconcile until the
-    /// transaction releases its lock.
-    private func handleFragmentChange() {
-        guard hasJoined, !isApplyingLocalWrite else {
-            // A local write binds its own text observation in `encodeToReplica`.
-            return
-        }
-        guard textObservation == nil, !isRemoteTextReconcileScheduled else { return }
-        isRemoteTextReconcileScheduled = true
-        Task { @MainActor [weak self] in
-            self?.reconcileRemotelyCreatedText()
-        }
-    }
-
-    /// Runs after a remote apply completes: binds the inner text observation and
-    /// pulls the just-created text into the `Document` via a `.remote` change.
-    private func reconcileRemotelyCreatedText() {
-        isRemoteTextReconcileScheduled = false
-        guard hasJoined else { return }
-        bindTextObservationIfAvailable()
-        applyRemoteText(currentReplicaText())
-    }
-
-    /// Observes the inner text node once it exists (it may be created by a local
-    /// edit or arrive in a remote update). Idempotent.
-    private func bindTextObservationIfAvailable() {
-        guard textObservation == nil, let textNode = currentEditableTextNode() else { return }
-        textObservation = try? textNode.observe { event in
-            guard case let .shared(shared) = event else { return }
-            MainActor.assumeIsolated { [weak self] in
-                self?.handleTextDelta(shared.delta)
+                self?.scheduleReconcile()
             }
         }
     }
@@ -161,13 +122,13 @@ public final class YBinding {
     func join() {
         guard !hasJoined else { return }
         hasJoined = true
-        let replicaText = currentReplicaText()
-        let documentText = core.document.plainText
-        switch (replicaText.isEmpty, documentText.isEmpty) {
+        let replica = currentReplicaMarkedText()
+        let document = documentMarkedText(core.document)
+        switch (replica.runs.isEmpty, document.runs.isEmpty) {
         case (false, _):
-            applyRemoteText(replicaText)
+            applyReplica(replica)
         case (true, false):
-            encodeToReplica(documentText)
+            encodeToReplica(document)
         case (true, true):
             // Leave Y structure-free so the first peer to type creates the paragraph.
             break
@@ -175,69 +136,190 @@ public final class YBinding {
         bindTextObservationIfAvailable()
     }
 
+    // MARK: - Scheduling
+
+    /// A remote update changed the replica. We cannot read Y structure inside the
+    /// observer (the apply's write txn still holds the lock), so the bind + decode
+    /// are deferred until the transaction releases.
+    private func scheduleReconcile() {
+        guard hasJoined, !isApplyingLocalWrite, !isReconcileScheduled else { return }
+        isReconcileScheduled = true
+        Task { @MainActor [weak self] in
+            self?.reconcileFromReplica()
+        }
+    }
+
+    private func reconcileFromReplica() {
+        isReconcileScheduled = false
+        guard hasJoined, !isApplyingLocalWrite else { return }
+        bindTextObservationIfAvailable()
+        applyReplica(currentReplicaMarkedText())
+    }
+
+    /// Observes the inner text node once it exists. Idempotent.
+    private func bindTextObservationIfAvailable() {
+        guard textObservation == nil, let textNode = currentEditableTextNode() else { return }
+        textObservation = try? textNode.observe { event in
+            guard case .shared = event else { return }
+            MainActor.assumeIsolated { [weak self] in
+                self?.scheduleReconcile()
+            }
+        }
+    }
+
     // MARK: - Encoder (PM → Y)
 
     private func handleLocalTransaction(_ applied: AppliedTransaction) {
         // A remote apply already matches the replica; re-encoding it would echo.
         guard hasJoined, applied.origin != .remote else { return }
-        encodeToReplica(applied.document.plainText)
+        encodeToReplica(documentMarkedText(applied.document))
     }
 
-    private func encodeToReplica(_ text: String) {
+    private func encodeToReplica(_ target: MarkedText) {
         isApplyingLocalWrite = true
         defer { isApplyingLocalWrite = false }
         try? doc.write(origin: Replica.bindingOrigin) { transaction in
             let paragraph = try Replica.ensureParagraph(in: fragment, transaction: transaction)
             let textNode = try Replica.ensureTextNode(in: paragraph, transaction: transaction)
-            let current = try transaction.string(from: textNode)
-            let diff = TextDiff(from: current, to: text)
-            guard diff.hasChange else { return }
+
+            // 1. Text characters: minimal common-prefix/suffix diff so a concurrent
+            //    remote insert into the same run survives.
+            let before = MarkedText(deltaJSON: try transaction.deltaJSON(from: textNode))
+            let diff = TextDiff(from: before.plainText, to: target.plainText)
             if diff.removedLength > 0 {
                 try transaction.remove(from: textNode, at: UInt32(diff.prefix), length: UInt32(diff.removedLength))
             }
             if !diff.inserted.isEmpty {
                 try transaction.insert(diff.inserted, into: textNode, at: UInt32(diff.prefix))
             }
+
+            // 2. Formatting: bring the per-character Marks to the target via format
+            //    ops (a new mark sets its attrs object; a dropped mark sets null).
+            let current = MarkedText(deltaJSON: try transaction.deltaJSON(from: textNode))
+            try reconcileFormatting(textNode, from: current, to: target, transaction: transaction)
         }
         bindTextObservationIfAvailable()
     }
 
-    // MARK: - Decoder (Y → PM)
+    private func reconcileFormatting(
+        _ textNode: YXmlText,
+        from current: MarkedText,
+        to target: MarkedText,
+        transaction: YWriteTransaction
+    ) throws {
+        let currentMarks = current.marksPerCharacter
+        let targetMarks = target.marksPerCharacter
+        let count = min(currentMarks.count, targetMarks.count)
+        var index = 0
+        while index < count {
+            let change = formatChange(from: currentMarks[index], to: targetMarks[index])
+            guard !change.isEmpty else { index += 1; continue }
+            var end = index + 1
+            while end < count,
+                  NSDictionary(dictionary: formatChange(from: currentMarks[end], to: targetMarks[end]))
+                    == NSDictionary(dictionary: change) {
+                end += 1
+            }
+            let data = try JSONSerialization.data(withJSONObject: change)
+            try transaction.format(textNode, at: UInt32(index), length: UInt32(end - index), attributesJSON: data)
+            index = end
+        }
+    }
 
-    /// Translates a remote `YXmlText` delta into a `.remote` ProseKit
-    /// transaction, carrying the local selection across the change.
-    private func handleTextDelta(_ delta: [YTextDeltaOperation]) {
-        guard hasJoined, !isApplyingLocalWrite else { return }
-
-        var cursor = textBasePosition
-        var steps: [any Step] = []
-        for op in delta {
-            switch op {
-            case let .retain(length, _):
-                cursor += Int(length)
-            case let .insert(value, _):
-                guard case let .string(string) = value, !string.isEmpty else { continue }
-                steps.append(ReplaceStep(from: cursor, to: cursor, insertText: string))
-                cursor += string.count
-            case let .delete(length):
-                steps.append(ReplaceStep(from: cursor, to: cursor + Int(length), insertText: ""))
+    /// The format attributes that turn `current` Marks into `target` Marks at one
+    /// character: each changed key maps to the target mark's attrs object, or
+    /// `NSNull` to clear a mark `target` no longer carries.
+    private func formatChange(from current: [Mark], to target: [Mark]) -> [String: Any] {
+        let currentAttrs = MarkAttributes.attributes(for: current)
+        let targetAttrs = MarkAttributes.attributes(for: target)
+        var change: [String: Any] = [:]
+        for key in Set(currentAttrs.keys).union(targetAttrs.keys) where currentAttrs[key] != targetAttrs[key] {
+            if let attrs = targetAttrs[key] {
+                change[key] = MarkedText.foundationObject(from: attrs)
+            } else {
+                change[key] = NSNull()
             }
         }
+        return change
+    }
+
+    // MARK: - Decoder (Y → PM)
+
+    /// Reconciles the local `Document` to the replica's marked text via a single
+    /// `.remote` transaction: a minimal text diff (so the caret survives), then
+    /// per-run mark Steps. Used by the Join gate and every deferred reconcile.
+    private func applyReplica(_ target: MarkedText) {
+        let document = core.document
+        let base = textBasePosition
+        let current = documentMarkedText(document)
+
+        var steps: [any Step] = []
+        var working = document
+
+        let diff = TextDiff(from: current.plainText, to: target.plainText)
+        if diff.hasChange {
+            let step = ReplaceStep(
+                from: base + diff.prefix,
+                to: base + diff.prefix + diff.removedLength,
+                insertText: diff.inserted
+            )
+            steps.append(step)
+            working = (try? step.apply(to: working).document) ?? working
+        }
+
+        steps.append(contentsOf: markSteps(in: working, base: base, target: target))
         applyRemoteSteps(steps)
     }
 
-    /// Reconciles the local `Document` to `replicaText` via a `.remote`
-    /// transaction. Used by the Join gate, which runs outside an observer and so
-    /// may read the replica.
-    private func applyRemoteText(_ replicaText: String) {
-        let base = textBasePosition
-        let diff = TextDiff(from: core.document.plainText, to: replicaText)
-        guard diff.hasChange else { return }
-        applyRemoteSteps([ReplaceStep(
-            from: base + diff.prefix,
-            to: base + diff.prefix + diff.removedLength,
-            insertText: diff.inserted
-        )])
+    /// Mark Steps that turn the document's current Marks into the target's.
+    ///
+    /// Iterates the document's **text nodes** (not a per-character span): adjacent
+    /// runs that happen to share a Mark set are still separate nodes, and the Mark
+    /// algebra requires each Step's range to stay inside one node. Within a node
+    /// the current Marks are uniform, so the range is split only where the target
+    /// Marks change. The working document is advanced as Steps apply, so a node
+    /// that splits out keeps later ranges resolvable.
+    private func markSteps(in document: Document, base: Position, target: MarkedText) -> [any Step] {
+        let targetMarks = target.marksPerCharacter
+        var steps: [any Step] = []
+        var working = document
+        var offset = 0
+
+        for run in documentMarkedText(document).runs {
+            let runStart = offset
+            let runEnd = offset + run.text.count
+            offset = runEnd
+            let currentSet = Set(run.marks)
+
+            var index = runStart
+            while index < runEnd, index < targetMarks.count {
+                let targetSet = Set(targetMarks[index])
+                if currentSet == targetSet { index += 1; continue }
+
+                var end = index + 1
+                while end < runEnd, end < targetMarks.count, Set(targetMarks[end]) == targetSet {
+                    end += 1
+                }
+
+                let range = (base + index)..<(base + end)
+                for mark in currentSet.subtracting(targetSet) {
+                    let step = RemoveMarkStep(from: range.lowerBound, to: range.upperBound, mark: mark)
+                    if let next = try? step.apply(to: working).document {
+                        steps.append(step)
+                        working = next
+                    }
+                }
+                for mark in targetSet.subtracting(currentSet) {
+                    let step = AddMarkStep(from: range.lowerBound, to: range.upperBound, mark: mark)
+                    if let next = try? step.apply(to: working).document {
+                        steps.append(step)
+                        working = next
+                    }
+                }
+                index = end
+            }
+        }
+        return steps
     }
 
     private func applyRemoteSteps(_ steps: [any Step]) {
@@ -247,14 +329,25 @@ public final class YBinding {
         core.applyRemote(Transaction(steps: steps, selection: mappedSelection, origin: .remote))
     }
 
+    // MARK: - Reads
+
     /// The Position of the first text character in the single paragraph. For a
     /// flat single-paragraph document this is the paragraph's open token + 1.
     private var textBasePosition: Position {
         core.document.endTextPosition - core.document.totalTextCount
     }
 
-    private func currentReplicaText() -> String {
-        (try? Replica.plainText(in: doc, fragment: fragment)) ?? ""
+    private func documentMarkedText(_ document: Document) -> MarkedText {
+        guard let block = document.root.content.first else { return MarkedText(runs: []) }
+        return MarkedText(textblock: block)
+    }
+
+    private func currentReplicaMarkedText() -> MarkedText {
+        let data = (try? doc.read { transaction -> Data in
+            guard let node = try Replica.textNode(in: fragment, transaction: transaction) else { return Data() }
+            return try transaction.deltaJSON(from: node)
+        }) ?? Data()
+        return MarkedText(deltaJSON: data)
     }
 
     private func currentEditableTextNode() -> YXmlText? {
@@ -265,8 +358,8 @@ public final class YBinding {
 }
 
 /// A minimal common prefix/suffix text diff. Indices are in `Character`s, which
-/// equals UTF-16 code units for the BMP (sufficient for the plain-text tracer;
-/// non-BMP handling is a later-slice concern).
+/// equals UTF-16 code units for the BMP (sufficient for the marks slice; non-BMP
+/// handling is a later-slice concern).
 private struct TextDiff {
     let prefix: Int
     let removedLength: Int

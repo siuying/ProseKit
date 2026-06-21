@@ -167,16 +167,18 @@ final class YBindingTests: XCTestCase {
 
     // MARK: - Decode (Y → PM) + loop break
 
-    func testRemoteChangeDecodesIntoDocument() throws {
+    func testRemoteChangeDecodesIntoDocument() async throws {
         let core = makeCore("hi")
         let doc = YDoc()
         let binding = YBinding(core: core, doc: doc)
         binding.join()
 
         try remoteInsert(doc, " there", at: 2)
+        await waitForDocumentText("hi there", in: core)
 
         XCTAssertEqual(core.document.plainText, "hi there")
         XCTAssertEqual(core.lastTransaction?.origin, .remote)
+        withExtendedLifetime(binding) {}
     }
 
     func testLocalEditDoesNotEchoAsSelfApply() throws {
@@ -195,7 +197,7 @@ final class YBindingTests: XCTestCase {
 
     // MARK: - Selection survival
 
-    func testRemoteInsertBeforeCaretKeepsCaretOnSameCharacter() throws {
+    func testRemoteInsertBeforeCaretKeepsCaretOnSameCharacter() async throws {
         let core = makeCore("world")
         let doc = YDoc()
         let binding = YBinding(core: core, doc: doc)
@@ -203,9 +205,11 @@ final class YBindingTests: XCTestCase {
         core.setSelection(TextSelection(anchor: 3, head: 3)) // caret after "w"
 
         try remoteInsert(doc, "XY", at: 0) // prepend before the caret
+        await waitForDocumentText("XYworld", in: core)
 
         XCTAssertEqual(core.document.plainText, "XYworld")
         XCTAssertEqual(core.selection.head, 5) // still right after "w"
+        withExtendedLifetime(binding) {}
     }
 
     // MARK: - Remote creation after an empty join
@@ -245,7 +249,7 @@ final class YBindingTests: XCTestCase {
 
     // MARK: - Two-peer convergence
 
-    func testTwoPeersConvergeOnConcurrentTyping() throws {
+    func testTwoPeersConvergeOnConcurrentTyping() async throws {
         // Peer A joins an empty replica and seeds the first paragraph.
         let coreA = makeCore("")
         let docA = YDoc()
@@ -268,11 +272,15 @@ final class YBindingTests: XCTestCase {
         try coreB.insertText(" B")
 
         try sync(docA, docB)
+        for _ in 0..<10 where coreA.document.plainText != coreB.document.plainText {
+            await Task.yield()
+        }
 
         XCTAssertEqual(coreA.document.plainText, coreB.document.plainText)
         XCTAssertFalse(coreA.document.plainText.isEmpty)
         XCTAssertTrue(coreA.document.plainText.contains("A"))
         XCTAssertTrue(coreA.document.plainText.contains("B"))
+        withExtendedLifetime((bindingA, bindingB)) {}
     }
 
     // MARK: - Fragment name

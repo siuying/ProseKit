@@ -77,6 +77,80 @@ final class YBindingInteropTests: XCTestCase {
         XCTAssertEqual(jsText, try replicaText(doc))
     }
 
+    // MARK: - Marks
+
+    func testRealYProsemirrorDecodesProseKitMarks() throws {
+        let fixture = try requireFixture()
+        let link = Mark.link(href: "https://example.com")
+        let core = EditorCore(document: Document(.doc([.paragraph([
+            .text("bold", marks: [.bold]),
+            .text(" plain"),
+            .text(" link", marks: [link]),
+        ])])))
+        let doc = YDoc()
+        let binding = YBinding(core: core, doc: doc)
+        binding.join()
+
+        let update = try doc.encodeStateAsUpdateV1()
+        let file = makeTempFile()
+        try update.data.write(to: file)
+
+        let marks = Self.marksByText(try fixture.run("decodeJSON", file.path))
+        XCTAssertEqual(marks["bold"], ["bold"])
+        XCTAssertEqual(marks[" plain"], [])
+        XCTAssertEqual(marks[" link"], ["link:https://example.com"])
+        withExtendedLifetime(binding) {}
+    }
+
+    func testProseKitDecodesMarksFromRealYProsemirror() throws {
+        let fixture = try requireFixture()
+        let json = #"""
+        {"type":"doc","content":[{"type":"paragraph","content":[
+        {"type":"text","text":"bold","marks":[{"type":"bold"}]},
+        {"type":"text","text":" link","marks":[{"type":"link","attrs":{"href":"https://example.com"}}]}
+        ]}]}
+        """#
+        let jsonFile = makeTempFile()
+        try Data(json.utf8).write(to: jsonFile)
+        let outFile = makeTempFile()
+        try fixture.run("encodeJSON", jsonFile.path, outFile.path)
+
+        let doc = YDoc()
+        try doc.apply(.v1(Data(contentsOf: outFile)))
+        let core = EditorCore(document: Document(.doc([.paragraph([])])))
+        let binding = YBinding(core: core, doc: doc)
+        binding.join()
+
+        let block = try XCTUnwrap(core.document.root.content.first)
+        let runs = MarkedText(textblock: block).runs
+        XCTAssertEqual(runs.map(\.text), ["bold", " link"])
+        XCTAssertEqual(runs.first?.marks, [.bold])
+        XCTAssertEqual(runs.last?.marks, [.link(href: "https://example.com")])
+        withExtendedLifetime(binding) {}
+    }
+
+    /// Maps each decoded text run to a sorted list of mark descriptors
+    /// (`"bold"`, `"link:<href>"`), for asserting what the JS peer sees.
+    private static func marksByText(_ json: String) -> [String: [String]] {
+        guard let data = json.data(using: .utf8),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let paragraph = (root["content"] as? [[String: Any]])?.first,
+              let inline = paragraph["content"] as? [[String: Any]] else { return [:] }
+        var result: [String: [String]] = [:]
+        for node in inline {
+            guard let text = node["text"] as? String else { continue }
+            let marks = (node["marks"] as? [[String: Any]] ?? []).map { mark -> String in
+                let type = mark["type"] as? String ?? "?"
+                if let href = (mark["attrs"] as? [String: Any])?["href"] as? String {
+                    return "\(type):\(href)"
+                }
+                return type
+            }
+            result[text] = marks.sorted()
+        }
+        return result
+    }
+
     // MARK: - Fixture harness
 
     private func replicaText(_ doc: YDoc) throws -> String {
