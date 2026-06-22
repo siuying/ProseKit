@@ -82,6 +82,36 @@ final class YBindingOpaqueTests: XCTestCase {
         withExtendedLifetime(binding) {}
     }
 
+    /// Probes the identity-scope boundary: inserting a block *before* the opaque
+    /// node shifts its position so `reconcileChildren`'s in-place `nodeName` match
+    /// misses, forcing a delete+reinsert from the decoded `Node` (`buildContent`).
+    /// For a simple atom that rebuild is faithful — tag, attr and atom-ness all
+    /// survive — which is the documented guarantee (richer wire shapes are not
+    /// covered; see `knownNodeTypes`).
+    func testPositionShiftRebuildsOpaqueAtomFaithfully() throws {
+        let doc = YDoc()
+        try seedWithOpaqueNode(doc)
+        let core = makeCore([.paragraph([])])
+        let binding = YBinding(core: core, doc: doc)
+        binding.join()
+        XCTAssertEqual(core.document.root.content.map(\.type), ["paragraph", "image", "paragraph"])
+
+        // Insert a new first paragraph, shifting the opaque image from index 1 to 2,
+        // then make a local edit so the whole shifted tree re-encodes into the replica.
+        let shifted = [Node.paragraph([.text("new")])] + core.document.root.content
+        core.document = Document(.doc(shifted))
+        core.setSelection(TextSelection(anchor: 1, head: 1))
+        try core.insertText("X")
+
+        // The image survived the delete+reinsert rebuild at its new index 2,
+        // byte-faithful for an atom.
+        let image = try element(doc, at: 2)
+        XCTAssertEqual(image?.tag, "image")
+        XCTAssertEqual(image?.attrs["src"] as? String, "cat.png")
+        XCTAssertEqual(image?.childCount, 0) // still an atom, no spurious text child
+        withExtendedLifetime(binding) {}
+    }
+
     // MARK: - Unknown marks
 
     func testDecodesAndPreservesUnknownMarkKey() throws {

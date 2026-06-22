@@ -36,8 +36,18 @@ public final class YBinding {
     private var syncTask: Task<Void, Never>?
 
     /// The node types ProseKit understands. A type outside this set is an Opaque
-    /// Node (ADR 0006): its `YXmlElement` subtree is preserved verbatim, never
-    /// reinterpreted or restructured (#70, convergence-critical).
+    /// Node (ADR 0006): ProseKit never authors or restructures it.
+    ///
+    /// Preservation is *identity-scoped*, not a true opaque payload: an opaque
+    /// element kept in place (positionally matched by `nodeName` in
+    /// `reconcileChildren`) keeps its CRDT identity untouched and is byte-faithful.
+    /// But when a sibling insert/delete shifts it so the positional match misses,
+    /// it is delete+reinserted from its *decoded* `Node` (`buildContent`). That
+    /// round-trip is faithful for the simple shapes ProseKit decodes (atom, single
+    /// text run, child elements) but is **not** a guaranteed-lossless verbatim
+    /// copy of arbitrary wire structure (e.g. mixed text+element children, which
+    /// `decodeElement` cannot represent). A true opaque payload model is deferred
+    /// to its own slice (ADR 0006). (#70, convergence-critical.)
     private let knownNodeTypes: Set<String>
 
     /// True while we are writing our own change into Y. The observers fire
@@ -238,10 +248,12 @@ public final class YBinding {
     /// Mutates a matched block element **in place** (attrs patched, content
     /// reconciled) so a concurrent remote edit into it survives.
     private func reconcileBlock(_ element: YXmlElement, to target: Node, transaction: YWriteTransaction) throws {
-        // An Opaque Node's subtree is never touched: ProseKit cannot author or
-        // edit it, so its decoded Node already equals the replica. Re-encoding it
-        // could restructure content SwiftYrs/PM model differently (e.g. add a text
-        // child to an atom) — exactly the data loss #70 forbids.
+        // A positionally-matched Opaque Node's subtree is never touched: ProseKit
+        // cannot author or edit it, so its decoded Node already equals the replica.
+        // Re-encoding it could restructure content the SwiftYrs/PM model differently
+        // (e.g. add a text child to an atom) — exactly the data loss #70 forbids.
+        // (A *position shift* that misses the match still rebuilds it via
+        // `buildContent`; see `knownNodeTypes` for that identity-scope caveat.)
         guard !isOpaque(target) else { return }
         try reconcileAttributes(element, to: target.attrs, transaction: transaction)
         try reconcileContent(of: element, to: target, transaction: transaction)
