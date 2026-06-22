@@ -35,6 +35,9 @@ const schema = new Schema({
       attrs: { level: { default: 1 }, textAlign: { default: null } },
       toDOM: (node) => [`h${node.attrs.level}`, 0],
     },
+    // An atom node ProseKit's Schema does not know — used to prove opaque
+    // round-trip (#70): ProseKit must preserve it byte-faithfully.
+    image: { group: "block", atom: true, attrs: { src: {} }, toDOM: (node) => ["img", { src: node.attrs.src }] },
     bulletList: { group: "block", content: "listItem+", toDOM: () => ["ul", 0] },
     orderedList: { group: "block", content: "listItem+", attrs: { start: { default: 1 } }, toDOM: () => ["ol", 0] },
     listItem: { content: "paragraph+", toDOM: () => ["li", 0] },

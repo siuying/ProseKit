@@ -35,6 +35,21 @@ public final class YBinding {
     private var blockObservations: [Observation] = []
     private var syncTask: Task<Void, Never>?
 
+    /// The node types ProseKit understands. A type outside this set is an Opaque
+    /// Node (ADR 0006): ProseKit never authors or restructures it.
+    ///
+    /// Preservation is *identity-scoped*, not a true opaque payload: an opaque
+    /// element kept in place (positionally matched by `nodeName` in
+    /// `reconcileChildren`) keeps its CRDT identity untouched and is byte-faithful.
+    /// But when a sibling insert/delete shifts it so the positional match misses,
+    /// it is delete+reinserted from its *decoded* `Node` (`buildContent`). That
+    /// round-trip is faithful for the simple shapes ProseKit decodes (atom, single
+    /// text run, child elements) but is **not** a guaranteed-lossless verbatim
+    /// copy of arbitrary wire structure (e.g. mixed text+element children, which
+    /// `decodeElement` cannot represent). A true opaque payload model is deferred
+    /// to its own slice (ADR 0006). (#70, convergence-critical.)
+    private let knownNodeTypes: Set<String>
+
     /// True while we are writing our own change into Y. The observers fire
     /// synchronously inside that write, so this guard breaks the loop.
     private var isApplyingLocalWrite = false
@@ -50,6 +65,7 @@ public final class YBinding {
         precondition(!fragmentName.isEmpty, "fragmentName must be non-empty and match the peer's root name")
         self.core = core
         self.doc = doc
+        self.knownNodeTypes = core.schema.nodes
         guard let fragment = try? doc.xmlFragment(named: fragmentName) else {
             preconditionFailure("YDoc could not vend an XML fragment named \(fragmentName)")
         }
@@ -206,12 +222,39 @@ public final class YBinding {
         for (key, value) in block.attrs where key != Self.reservedAttributeKey && value != .null {
             try transaction.setAttribute(yValue(value), forKey: key, in: element)
         }
-        try reconcileContent(of: element, to: block, transaction: transaction)
+        try buildContent(of: element, from: block, transaction: transaction)
+    }
+
+    /// Builds a freshly-inserted element's content from a Node. An Opaque Node is
+    /// reconstructed by its content shape alone (text run, child elements, or — an
+    /// atom — nothing), so a childless unknown node never gains a spurious text
+    /// child; a known textblock seeds its (possibly empty) `YXmlText`.
+    private func buildContent(of element: YXmlElement, from block: Node, transaction: YWriteTransaction) throws {
+        if isOpaque(block) {
+            if block.content.contains(where: \.isText) {
+                let textNode = try transaction.insertText(into: element, at: 0)
+                try transaction.applyDeltaJSON(MarkedText(textblock: block).deltaJSON(), to: textNode)
+            } else {
+                try reconcileChildren(of: element, to: block.content, transaction: transaction)
+            }
+        } else if block.isTextblock {
+            let textNode = try transaction.insertText(into: element, at: 0)
+            try reconcileText(textNode, to: MarkedText(textblock: block), transaction: transaction)
+        } else {
+            try reconcileChildren(of: element, to: block.content, transaction: transaction)
+        }
     }
 
     /// Mutates a matched block element **in place** (attrs patched, content
     /// reconciled) so a concurrent remote edit into it survives.
     private func reconcileBlock(_ element: YXmlElement, to target: Node, transaction: YWriteTransaction) throws {
+        // A positionally-matched Opaque Node's subtree is never touched: ProseKit
+        // cannot author or edit it, so its decoded Node already equals the replica.
+        // Re-encoding it could restructure content the SwiftYrs/PM model differently
+        // (e.g. add a text child to an atom) — exactly the data loss #70 forbids.
+        // (A *position shift* that misses the match still rebuilds it via
+        // `buildContent`; see `knownNodeTypes` for that identity-scope caveat.)
+        guard !isOpaque(target) else { return }
         try reconcileAttributes(element, to: target.attrs, transaction: transaction)
         try reconcileContent(of: element, to: target, transaction: transaction)
     }
@@ -225,6 +268,10 @@ public final class YBinding {
         } else {
             try reconcileChildren(of: element, to: target.content, transaction: transaction)
         }
+    }
+
+    private func isOpaque(_ node: Node) -> Bool {
+        !node.isText && !knownNodeTypes.contains(node.type)
     }
 
     private func reconcileAttributes(_ element: YXmlElement, to target: [String: JSONValue], transaction: YWriteTransaction) throws {
