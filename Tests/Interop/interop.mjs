@@ -27,8 +27,14 @@ const FRAGMENT = "prosemirror";
 // byte-for-byte.
 const schema = new Schema({
   nodes: {
-    doc: { content: "paragraph+" },
-    paragraph: { content: "text*", toDOM: () => ["p", 0] },
+    doc: { content: "block+" },
+    paragraph: { group: "block", content: "text*", attrs: { textAlign: { default: null } }, toDOM: () => ["p", 0] },
+    heading: {
+      group: "block",
+      content: "text*",
+      attrs: { level: { default: 1 }, textAlign: { default: null } },
+      toDOM: (node) => [`h${node.attrs.level}`, 0],
+    },
     text: {},
   },
   marks: {

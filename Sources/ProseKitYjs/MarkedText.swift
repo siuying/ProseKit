@@ -81,6 +81,13 @@ struct MarkedText: Equatable {
         return result
     }
 
+    /// A JSON attribute object (from `attributesJSON`) as a scalar
+    /// `[String: JSONValue]` — a ProseMirror node's Attrs. Non-scalar values are
+    /// dropped (scalar-only, matching `JSONValue`).
+    static func attributes(fromJSON object: [String: Any]) -> [String: JSONValue] {
+        object.compactMapValues(jsonValue)
+    }
+
     static func marks(fromAttributes attributes: [String: Any]) -> [Mark] {
         var typed: [String: [String: JSONValue]] = [:]
         for (key, value) in attributes {
@@ -124,10 +131,14 @@ struct MarkedText: Equatable {
             if CFGetTypeID(number) == CFBooleanGetTypeID() {
                 return .bool(number.boolValue)
             }
-            if CFNumberIsFloatType(number) {
-                return .double(number.doubleValue)
+            // lib0 round-trips every number as a double, but ProseMirror attrs
+            // like heading.level are ints — normalise a whole number to .int so
+            // it matches ProseKit's own encoding (and a fractional one stays double).
+            let value = number.doubleValue
+            if value.rounded() == value, abs(value) < 9.0e15 {
+                return .int(Int(value))
             }
-            return .int(number.intValue)
+            return .double(value)
         default:
             return nil
         }
