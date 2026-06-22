@@ -958,22 +958,27 @@ public struct LiftStep: Step, Codable, Equatable, Sendable {
     }
 }
 
-/// Replaces a contiguous range of **top-level** blocks with arbitrary new block
-/// nodes — the general structural primitive a collaboration binding needs to
-/// apply a remote document state whose block types, attrs, or count changed and
-/// which the editor's narrower Steps cannot express. Flat documents only (the
-/// top-level `replacingBlocks`); the nested, path-keyed variant is a later slice.
+/// Replaces a contiguous range of a container's child blocks with arbitrary new
+/// block nodes — the general structural primitive a collaboration binding needs
+/// to apply a remote document state whose block types, attrs, or count changed
+/// and which the editor's narrower Steps cannot express. `parentPath` selects the
+/// container (empty = top level; non-empty = nested, e.g. a list's items).
 ///
 /// `from` (the first replaced block's opening Position) and `removedSize` (the
 /// total node size removed) are captured at construction so `map` stays pure,
 /// mirroring `ReplaceStep`'s position algebra in block space.
 public struct ReplaceBlocksStep: Step, Codable, Equatable, Sendable {
+    /// The container whose children are replaced (root-to-node child indices);
+    /// empty replaces top-level blocks. A non-empty path is the nested, path-keyed
+    /// variant (e.g. replacing the items of a list).
+    public var parentPath: [Int]
     public var blockRange: Range<Int>
     public var blocks: [Node]
     public var from: Position
     public var removedSize: Int
 
-    public init(blockRange: Range<Int>, blocks: [Node], from: Position, removedSize: Int) {
+    public init(parentPath: [Int] = [], blockRange: Range<Int>, blocks: [Node], from: Position, removedSize: Int) {
+        self.parentPath = parentPath
         self.blockRange = blockRange
         self.blocks = blocks
         self.from = from
@@ -986,14 +991,15 @@ public struct ReplaceBlocksStep: Step, Codable, Equatable, Sendable {
 
     public func apply(to document: Document) throws -> StepApplication {
         StepApplication(
-            document: document.replacingBlocks(in: blockRange, with: blocks),
+            document: document.replacingBlocks(at: parentPath, childRange: blockRange, with: blocks),
             changedRange: from..<max(from + insertedSize, from + 1)
         )
     }
 
     public func inverted(in document: Document) throws -> any Step {
-        let original = Array(document.root.content[blockRange])
+        let original = Array(document.node(atPath: parentPath).content[blockRange])
         return ReplaceBlocksStep(
+            parentPath: parentPath,
             blockRange: blockRange.lowerBound..<(blockRange.lowerBound + blocks.count),
             blocks: original,
             from: from,
