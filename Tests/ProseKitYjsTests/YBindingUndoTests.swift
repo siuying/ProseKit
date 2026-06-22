@@ -155,18 +155,28 @@ final class YBindingUndoTests: XCTestCase {
         XCTAssertEqual(core.document.plainText, "hi")
     }
 
-    func testDetachRestoresSoloHistory() throws {
+    func testDetachLeavesNoStaleSoloHistory() throws {
         let core = makeCore("hi")
         let doc = YDoc()
         let binding = YBinding(core: core, doc: doc)
         binding.join()
         appendCaret(core)
-        try core.insertText("!")
+        try core.insertText("!") // a collaborative local edit
 
         binding.detach()
 
-        XCTAssertTrue(core.canUndo) // solo step history (recorded all along)
+        // The collaborative edit was never recorded into the solo history (its
+        // positions could be invalidated by concurrent remote ops), so detach
+        // exposes no stale, replay-unsafe undo step.
+        XCTAssertFalse(core.canUndo)
+        XCTAssertFalse(core.undo())
+        XCTAssertEqual(core.document.plainText, "hi!")
+
+        // Solo editing resumes cleanly: a fresh post-detach edit is undoable.
+        appendCaret(core)
+        try core.insertText("?")
+        XCTAssertTrue(core.canUndo)
         XCTAssertTrue(core.undo())
-        XCTAssertEqual(core.document.plainText, "hi")
+        XCTAssertEqual(core.document.plainText, "hi!")
     }
 }

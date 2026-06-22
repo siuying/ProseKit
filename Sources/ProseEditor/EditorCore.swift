@@ -43,7 +43,7 @@ public enum EditorEditAction {
     public var document: Document {
         get { state.document }
         set {
-            state = EditorState(document: newValue)
+            state = EditorState(document: newValue, recordsHistory: !isCollaborativeUndoActive)
             relayout()
         }
     }
@@ -62,6 +62,7 @@ public enum EditorEditAction {
             lastTransaction: state.lastTransaction,
             typingMarks: state.typingMarks,
             history: history,
+            recordsHistory: state.recordsHistory,
             revision: state.revision
         )
         // Mirror the solo caret-jump coalescing boundary onto the collaborative
@@ -134,11 +135,23 @@ public enum EditorEditAction {
     /// When true, the solo step-based history is suppressed: `canUndo`/`canRedo`
     /// report false and `undo()`/`redo()` are no-ops. A fallback for a binding
     /// that cannot provide a `collaborativeUndoController` (ADR 0010).
-    public var isUndoSuppressed = false
+    public var isUndoSuppressed = false {
+        didSet { state.recordsHistory = !isCollaborativeUndoActive }
+    }
 
     /// When set (by a collaboration binding), undo/redo delegate to CRDT-backed
     /// undo scoped to the local peer instead of the solo step history.
-    public weak var collaborativeUndoController: (any CollaborativeUndoController)?
+    public weak var collaborativeUndoController: (any CollaborativeUndoController)? {
+        didSet { state.recordsHistory = !isCollaborativeUndoActive }
+    }
+
+    /// While collaborative undo is active (a controller is attached, or the
+    /// suppression fallback is on) the solo step history is dormant: it neither
+    /// records nor serves undo. So it cannot expose stale, remote-invalidated
+    /// steps after `detach()` re-enables solo mode (ADR 0010).
+    private var isCollaborativeUndoActive: Bool {
+        collaborativeUndoController != nil || isUndoSuppressed
+    }
 
     public var canUndo: Bool {
         if let controller = collaborativeUndoController { return controller.canUndo }
