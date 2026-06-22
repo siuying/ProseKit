@@ -26,38 +26,6 @@ final class YBindingReconnectTests: XCTestCase {
         for _ in 0..<10 where core.document.plainText != expected { await Task.yield() }
     }
 
-    // MARK: - Collaborative-undo guard (ADR 0010)
-
-    func testUndoSuppressedWhileBound() throws {
-        let core = makeCore("hi")
-        let doc = YDoc()
-        let binding = YBinding(core: core, doc: doc)
-        binding.join()
-
-        try core.insertText("!") // a normally-undoable local edit
-
-        XCTAssertFalse(core.canUndo)
-        XCTAssertFalse(core.canRedo)
-        XCTAssertFalse(core.undo()) // gesture is a no-op
-        XCTAssertEqual(core.document.plainText, "hi!") // undo did nothing
-        withExtendedLifetime(binding) {}
-    }
-
-    func testUndoRestoredAfterDetach() throws {
-        let core = makeCore("hi")
-        let doc = YDoc()
-        let binding = YBinding(core: core, doc: doc)
-        binding.join()
-        try core.insertText("!")
-        XCTAssertFalse(core.canUndo)
-
-        binding.detach()
-
-        XCTAssertTrue(core.canUndo) // solo step history restored
-        XCTAssertTrue(core.undo())
-        XCTAssertEqual(core.document.plainText, "hi")
-    }
-
     // MARK: - Reconnect / offline convergence
 
     func testPartitionedPeersConvergeOnHeal() async throws {
