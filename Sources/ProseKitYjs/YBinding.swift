@@ -80,15 +80,25 @@ public final class YBinding {
                 self?.scheduleReconcile()
             }
         }
+        // Collab undo is delegated to the CRDT (ADR 0010); while bound, the solo
+        // step-based history is suppressed so it never runs against concurrently
+        // edited state. The collaborative-undo slice replaces this no-op guard.
+        core.isUndoSuppressed = true
     }
 
-    /// Drives the Join gate off the provider's `synced` signal: on the first
-    /// `true`, reconcile the `Document` and the replica, then go live.
+    /// Drives convergence off the provider's `synced` signal. The first `true`
+    /// runs the Join gate; every later `true` (a reconnect's sync completing)
+    /// re-runs the non-empty-replica reconcile, so a peer that edited offline and
+    /// rejoined converges on the merged state.
     public func attach(syncedSignal: AsyncStream<Bool>) {
         syncTask = Task { @MainActor [weak self] in
             for await synced in syncedSignal where synced {
-                self?.join()
-                break
+                guard let self else { return }
+                if self.hasJoined {
+                    self.applyReplica(self.replicaBlocks())
+                } else {
+                    self.join()
+                }
             }
         }
     }
@@ -99,6 +109,7 @@ public final class YBinding {
         fragmentObservation = nil
         blockObservations = []
         core.didApplyTransaction = nil
+        core.isUndoSuppressed = false
         hasJoined = false
     }
 
