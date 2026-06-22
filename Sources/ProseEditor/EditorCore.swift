@@ -111,8 +111,14 @@ public enum EditorEditAction {
         }
     }
 
-    public var canUndo: Bool { state.history.canUndo }
-    public var canRedo: Bool { state.history.canRedo }
+    /// When true, the solo step-based history is suppressed: `canUndo`/`canRedo`
+    /// report false and `undo()`/`redo()` are no-ops. A collaboration binding sets
+    /// this while attached (ADR 0010) so the step stack never runs against
+    /// concurrently-edited state, until collaborative undo (YUndoManager) lands.
+    public var isUndoSuppressed = false
+
+    public var canUndo: Bool { !isUndoSuppressed && state.history.canUndo }
+    public var canRedo: Bool { !isUndoSuppressed && state.history.canRedo }
 
     public func canPerformEditAction(_ action: EditorEditAction, pasteboardHasStrings: Bool) -> Bool {
         switch action {
@@ -127,6 +133,7 @@ public enum EditorEditAction {
 
     @discardableResult
     public func undo() -> Bool {
+        guard !isUndoSuppressed else { return false }
         do {
             return try runAndNotifyIfTransactionApplied {
                 let ran = try state.undo()
@@ -143,6 +150,7 @@ public enum EditorEditAction {
 
     @discardableResult
     public func redo() -> Bool {
+        guard !isUndoSuppressed else { return false }
         do {
             return try runAndNotifyIfTransactionApplied {
                 let ran = try state.redo()
