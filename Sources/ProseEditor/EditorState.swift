@@ -7,6 +7,13 @@ public struct EditorState: Sendable {
     public private(set) var lastTransaction: AppliedTransaction?
     public private(set) var typingMarks: [Mark]
     public private(set) var history: EditorHistory
+    /// When false, local edits do not accumulate undo history. A collaboration
+    /// binding sets this so the solo step history never records collaborative
+    /// transactions — their positions are invalidated by concurrent remote ops
+    /// applied without history mapping, so replaying them after detach would
+    /// corrupt the document. Collaborative undo delegates to the CRDT undo
+    /// manager instead (ADR 0010).
+    public var recordsHistory: Bool
     /// Monotonic count of applied Transactions. Every `dispatch` bumps it once,
     /// so a caller can detect "a Transaction was applied" by a change in value.
     public private(set) var revision: Int
@@ -17,6 +24,7 @@ public struct EditorState: Sendable {
         lastTransaction: AppliedTransaction? = nil,
         typingMarks: [Mark] = [],
         history: EditorHistory = EditorHistory(),
+        recordsHistory: Bool = true,
         revision: Int = 0
     ) {
         self.document = document
@@ -24,6 +32,7 @@ public struct EditorState: Sendable {
         self.lastTransaction = lastTransaction
         self.typingMarks = typingMarks
         self.history = history
+        self.recordsHistory = recordsHistory
         self.revision = revision
     }
 
@@ -78,7 +87,7 @@ public struct EditorState: Sendable {
     ) throws {
         let beforeDocument = document
         let beforeSelection = selection
-        let shouldRecord = recordsHistory && transaction.origin == .local && !transaction.steps.isEmpty
+        let shouldRecord = self.recordsHistory && recordsHistory && transaction.origin == .local && !transaction.steps.isEmpty
         let applied = try transaction.apply(to: document)
         document = applied.document
         selection = applied.selection

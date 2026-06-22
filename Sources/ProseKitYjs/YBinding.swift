@@ -15,14 +15,17 @@ import SwiftYrs
 /// a deferred full-replica reconcile, because Yjs deep-change observers cannot
 /// carry object-valued attributes back to us.
 @MainActor
-public final class YBinding {
+public final class YBinding: CollaborativeUndoController {
     /// y-prosemirror's default root name. Tiptap defaults to `"default"`; both
     /// peers MUST agree or they silently never converge (see `attach`).
     public static let defaultFragmentName = "prosemirror"
 
     /// Reserved by y-prosemirror for snapshot diff rendering — never written, skipped on read.
     private static let reservedAttributeKey = "ychange"
-    private static let bindingOrigin = "prosekit-yjs-binding"
+    /// A per-binding write origin. Unique so the YUndoManager (scoped via
+    /// `includeOrigin`) tracks only *this* peer's local edits — never another
+    /// peer's changes that sync into the same `YDoc`.
+    private let bindingOrigin = "prosekit-yjs-binding-\(UUID().uuidString)"
 
     private let core: EditorCore
     private let doc: YDoc
@@ -34,6 +37,7 @@ public final class YBinding {
     /// observed set is reconciled to the current children on every reconcile.
     private var blockObservations: [Observation] = []
     private var syncTask: Task<Void, Never>?
+    private var undoManager: YUndoManager?
 
     /// The node types ProseKit understands. A type outside this set is an Opaque
     /// Node (ADR 0006): ProseKit never authors or restructures it.
@@ -80,10 +84,20 @@ public final class YBinding {
                 self?.scheduleReconcile()
             }
         }
-        // Collab undo is delegated to the CRDT (ADR 0010); while bound, the solo
-        // step-based history is suppressed so it never runs against concurrently
-        // edited state. The collaborative-undo slice replaces this no-op guard.
-        core.isUndoSuppressed = true
+        // Collaborative undo (ADR 0010): undo/redo delegate to a YUndoManager
+        // scoped to this binding's local origin, so they revert only the local
+        // peer's changes as new CRDT operations and concurrent remote edits
+        // survive. A solo (unbound) editor keeps its step-based history.
+        let undoManager = YUndoManager(document: doc)
+        if (try? undoManager.addScope(fragment)) != nil {
+            undoManager.includeOrigin(bindingOrigin)
+            self.undoManager = undoManager
+            core.collaborativeUndoController = self
+            core.onUndoCoalescingBreak = { [weak self] in self?.undoManager?.stopCapturing() }
+        } else {
+            // Without a usable CRDT undo manager, suppress the solo stack instead.
+            core.isUndoSuppressed = true
+        }
     }
 
     /// Drives convergence off the provider's `synced` signal. The first `true`
@@ -117,6 +131,11 @@ public final class YBinding {
         blockObservations = []
         core.didApplyTransaction = nil
         core.isUndoSuppressed = false
+        if core.collaborativeUndoController === self {
+            core.collaborativeUndoController = nil
+        }
+        core.onUndoCoalescingBreak = nil
+        undoManager = nil
         hasJoined = false
     }
 
@@ -137,6 +156,8 @@ public final class YBinding {
             break // an empty document must not seed a competing empty block
         }
         observeBlocks()
+        // The Join seed/reconcile is not a user edit, so it must not be undoable.
+        undoManager?.clear()
     }
 
     // MARK: - Scheduling
@@ -201,7 +222,7 @@ public final class YBinding {
     private func encodeToReplica(_ blocks: [Node]) {
         isApplyingLocalWrite = true
         defer { isApplyingLocalWrite = false }
-        try? doc.write(origin: Self.bindingOrigin) { transaction in
+        try? doc.write(origin: bindingOrigin) { transaction in
             try reconcileChildren(of: fragment, to: blocks, transaction: transaction)
         }
         observeBlocks()
@@ -536,6 +557,25 @@ public final class YBinding {
         if parentPath.isEmpty { return document.endPosition }
         guard let parentPosition = document.position(ofNodeAtPath: parentPath) else { return nil }
         return parentPosition + parent.nodeSize - 1
+    }
+
+    // MARK: - Collaborative undo (CollaborativeUndoController)
+
+    /// True while the local peer has a change the YUndoManager can revert. A
+    /// YUndoManager undo writes the inverse into Y as a new operation; the
+    /// binding's observers then carry it into the `Document` via the `.remote`
+    /// path, so concurrent remote edits survive.
+    public var canUndo: Bool { (undoManager?.undoStackCount ?? 0) > 0 }
+    public var canRedo: Bool { (undoManager?.redoStackCount ?? 0) > 0 }
+
+    public func undo() -> Bool {
+        guard let undoManager else { return false }
+        return (try? undoManager.undo()) ?? false
+    }
+
+    public func redo() -> Bool {
+        guard let undoManager else { return false }
+        return (try? undoManager.redo()) ?? false
     }
 
     private func yValue(_ value: JSONValue) -> YValue {

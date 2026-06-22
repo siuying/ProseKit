@@ -26,6 +26,12 @@ solo (non-collaborative) editor; this decision only qualifies it for collab.
 
 - Two undo code paths: step-based when solo, Y-driven when collaborating. They
   must present one face to the user (same gesture/menu wiring).
+- While collaborating the solo step history is **dormant**: it neither serves
+  undo nor *records* local edits (`EditorState.recordsHistory == false`).
+  Recording would accumulate steps whose positions concurrent remote ops
+  invalidate (remote edits apply without history mapping), so re-enabling the
+  solo stack on `detach()` would otherwise expose stale, replay-unsafe entries.
+  Detach therefore leaves an empty solo history; fresh solo edits record anew.
 - A `YUndoManager` undo surfaces as a `history`/`remote`-Origin **Transaction** via
   the **Binding**, not as a replayed local Step entry.
 - The `NSUndoManager` bridge (system shake / Cmd+Z / keyboard undo bar) routes into

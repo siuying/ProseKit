@@ -9,6 +9,17 @@ public enum EditorEditAction {
     case selectAll
 }
 
+/// Supplies CRDT-backed undo scoped to the local peer. A collaboration binding
+/// adopts this so `EditorCore.undo()/redo()` revert only the local peer's changes
+/// (as new CRDT operations) rather than running the solo step history against
+/// concurrently-edited state (ADR 0010).
+@MainActor public protocol CollaborativeUndoController: AnyObject {
+    var canUndo: Bool { get }
+    var canRedo: Bool { get }
+    func undo() -> Bool
+    func redo() -> Bool
+}
+
 @MainActor public final class EditorCore {
     public private(set) var state: EditorState
     public private(set) var layoutStore: IncrementalLayoutStore
@@ -32,7 +43,7 @@ public enum EditorEditAction {
     public var document: Document {
         get { state.document }
         set {
-            state = EditorState(document: newValue)
+            state = EditorState(document: newValue, recordsHistory: !isCollaborativeUndoActive)
             relayout()
         }
     }
@@ -51,9 +62,19 @@ public enum EditorEditAction {
             lastTransaction: state.lastTransaction,
             typingMarks: state.typingMarks,
             history: history,
+            recordsHistory: state.recordsHistory,
             revision: state.revision
         )
+        // Mirror the solo caret-jump coalescing boundary onto the collaborative
+        // undo manager. (The CRDT manager may also split on its own capture
+        // timeout, so grouping is close but not identical to solo mode.)
+        onUndoCoalescingBreak?()
     }
+
+    /// Fires when the solo undo history breaks typing coalescing (a caret jump),
+    /// so a collaboration binding can stop the CRDT undo manager's capture at the
+    /// same boundary.
+    public var onUndoCoalescingBreak: (() -> Void)?
 
     private func runAndNotifyIfTransactionApplied<T>(_ work: () throws -> T) rethrows -> T {
         let revision = state.revision
@@ -112,13 +133,35 @@ public enum EditorEditAction {
     }
 
     /// When true, the solo step-based history is suppressed: `canUndo`/`canRedo`
-    /// report false and `undo()`/`redo()` are no-ops. A collaboration binding sets
-    /// this while attached (ADR 0010) so the step stack never runs against
-    /// concurrently-edited state, until collaborative undo (YUndoManager) lands.
-    public var isUndoSuppressed = false
+    /// report false and `undo()`/`redo()` are no-ops. A fallback for a binding
+    /// that cannot provide a `collaborativeUndoController` (ADR 0010).
+    public var isUndoSuppressed = false {
+        didSet { state.recordsHistory = !isCollaborativeUndoActive }
+    }
 
-    public var canUndo: Bool { !isUndoSuppressed && state.history.canUndo }
-    public var canRedo: Bool { !isUndoSuppressed && state.history.canRedo }
+    /// When set (by a collaboration binding), undo/redo delegate to CRDT-backed
+    /// undo scoped to the local peer instead of the solo step history.
+    public weak var collaborativeUndoController: (any CollaborativeUndoController)? {
+        didSet { state.recordsHistory = !isCollaborativeUndoActive }
+    }
+
+    /// While collaborative undo is active (a controller is attached, or the
+    /// suppression fallback is on) the solo step history is dormant: it neither
+    /// records nor serves undo. So it cannot expose stale, remote-invalidated
+    /// steps after `detach()` re-enables solo mode (ADR 0010).
+    private var isCollaborativeUndoActive: Bool {
+        collaborativeUndoController != nil || isUndoSuppressed
+    }
+
+    public var canUndo: Bool {
+        if let controller = collaborativeUndoController { return controller.canUndo }
+        return !isUndoSuppressed && state.history.canUndo
+    }
+
+    public var canRedo: Bool {
+        if let controller = collaborativeUndoController { return controller.canRedo }
+        return !isUndoSuppressed && state.history.canRedo
+    }
 
     public func canPerformEditAction(_ action: EditorEditAction, pasteboardHasStrings: Bool) -> Bool {
         switch action {
@@ -133,6 +176,7 @@ public enum EditorEditAction {
 
     @discardableResult
     public func undo() -> Bool {
+        if let controller = collaborativeUndoController { return controller.undo() }
         guard !isUndoSuppressed else { return false }
         do {
             return try runAndNotifyIfTransactionApplied {
@@ -150,6 +194,7 @@ public enum EditorEditAction {
 
     @discardableResult
     public func redo() -> Bool {
+        if let controller = collaborativeUndoController { return controller.redo() }
         guard !isUndoSuppressed else { return false }
         do {
             return try runAndNotifyIfTransactionApplied {
