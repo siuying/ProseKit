@@ -88,14 +88,21 @@ public final class YBinding {
 
     /// Drives convergence off the provider's `synced` signal. The first `true`
     /// runs the Join gate; every later `true` (a reconnect's sync completing)
-    /// re-runs the non-empty-replica reconcile, so a peer that edited offline and
-    /// rejoined converges on the merged state.
+    /// re-runs the canonical reconcile, so a peer that edited offline and rejoined
+    /// converges on the merged state.
     public func attach(syncedSignal: AsyncStream<Bool>) {
         syncTask = Task { @MainActor [weak self] in
             for await synced in syncedSignal where synced {
                 guard let self else { return }
                 if self.hasJoined {
-                    self.applyReplica(self.replicaBlocks())
+                    // Reconnect goes through the one canonical reconcile path
+                    // (refresh observations → read replica → apply), the same as
+                    // an observer-driven reconcile, rather than a second
+                    // applyReplica branch that skipped re-observation. Convergence
+                    // is unchanged (the fragment observer already schedules a
+                    // reconcile on the reconnect's structural changes); this just
+                    // removes the divergent path.
+                    self.reconcileFromReplica()
                 } else {
                     self.join()
                 }

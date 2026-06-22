@@ -89,6 +89,47 @@ final class YBindingReconnectTests: XCTestCase {
         withExtendedLifetime((bindingA, bindingB)) {}
     }
 
+    /// Regression guard for the canonical reconnect path: a reconnect that
+    /// introduces a *new* block, followed by a *deep* edit into that block, must
+    /// converge on B. (The deep edit is one the fragment observer never sees, so
+    /// it relies on the new block having been observed during the reconnect
+    /// reconcile.)
+    func testDeepEditIntoReconnectIntroducedBlockConverges() async throws {
+        let coreA = makeCore("hello")
+        let docA = YDoc()
+        let bindingA = YBinding(core: coreA, doc: docA)
+        bindingA.join()
+
+        let coreB = makeCore("")
+        let docB = YDoc()
+        let bindingB = YBinding(core: coreB, doc: docB)
+        let signal = AsyncStream<Bool>.makeStream()
+        bindingB.attach(syncedSignal: signal.stream)
+
+        try docB.apply(docA.encodeStateAsUpdateV1(from: docB.stateVector()))
+        signal.continuation.yield(true)
+        await waitForDocumentText("hello", in: coreB)
+
+        // A introduces a second block while B is offline.
+        coreA.document = Document(.doc([.paragraph([.text("hello")]), .paragraph([.text("world")])]))
+        appendCaret(coreA)
+        try coreA.insertText("!") // forces the two-block tree to encode
+
+        // B reconnects: the new "world" block arrives and must be observed.
+        try docB.apply(docA.encodeStateAsUpdateV1(from: docB.stateVector()))
+        signal.continuation.yield(true)
+        await waitForDocumentText("helloworld!", in: coreB)
+
+        // A now deep-edits inside that block (a change the fragment observer never sees).
+        appendCaret(coreA)
+        try coreA.insertText("?")
+        try docB.apply(docA.encodeStateAsUpdateV1(from: docB.stateVector()))
+        await waitForDocumentText("helloworld!?", in: coreB)
+
+        XCTAssertEqual(coreB.document.plainText, coreA.document.plainText)
+        withExtendedLifetime((bindingA, bindingB)) {}
+    }
+
     func testReconnectReReconcilesViaSyncedSignal() async throws {
         let coreA = makeCore("hello")
         let docA = YDoc()
