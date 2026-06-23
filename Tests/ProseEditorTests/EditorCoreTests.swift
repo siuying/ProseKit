@@ -230,4 +230,45 @@ final class EditorCoreTests: XCTestCase {
         // even though the caret sits to the right of an italic run.
         XCTAssertFalse(core.state.isActive(.italic))
     }
+
+    // MARK: - Immediate Backspace revert (Phase 4)
+
+    func testBackspaceAfterBlockRuleRestoresLiteralMarkdown() throws {
+        let core = emptyParagraphCore()
+        try core.insertText("# ")
+        XCTAssertEqual(core.document.root.content[0].type, "heading")
+
+        XCTAssertTrue(core.undoInputRule())
+        XCTAssertEqual(core.document.root.content[0].type, "paragraph")
+        XCTAssertEqual(core.document.root.content[0].plainText, "# ")
+    }
+
+    func testBackspaceAfterInlineRuleRestoresLiteralMarkdown() throws {
+        let core = emptyParagraphCore()
+        try core.insertText("*Italic*")
+        XCTAssertEqual(runs(core).map(\.marks), [[.italic]])
+
+        XCTAssertTrue(core.undoInputRule())
+        XCTAssertEqual(core.document.root.content[0].plainText, "*Italic*")
+        XCTAssertEqual(runs(core).map(\.marks), [[]])
+    }
+
+    func testUndoInputRuleIsANoopAfterSelectionMove() throws {
+        let core = emptyParagraphCore()
+        try core.insertText("# ")
+        core.setSelection(TextSelection(anchor: 1, head: 1))   // move the caret
+
+        XCTAssertFalse(core.undoInputRule())
+        XCTAssertEqual(core.document.root.content[0].type, "heading")
+    }
+
+    func testUndoInputRuleIsANoopAfterFurtherTyping() throws {
+        let core = emptyParagraphCore()
+        try core.insertText("# ")
+        try core.insertText("x")   // an unrelated edit consumes the snapshot
+
+        XCTAssertFalse(core.undoInputRule())
+        XCTAssertEqual(core.document.root.content[0].type, "heading")
+        XCTAssertEqual(core.document.root.content[0].plainText, "x")
+    }
 }

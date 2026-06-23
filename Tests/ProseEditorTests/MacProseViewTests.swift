@@ -601,5 +601,29 @@ extension MacProseViewTests {
         XCTAssertEqual(runs.map(\.text), ["a", "Code"])
         XCTAssertEqual(runs.map(\.marks), [[], [.code]])
     }
+
+    // MARK: - Immediate Backspace revert (Phase 4)
+
+    func testBackspaceAfterBlockShortcutRestoresLiteralInMacView() {
+        let view = emptyParaMacView()
+        type("# ", into: view)
+        XCTAssertEqual(view.document.root.content[0].type, "heading")
+
+        view.doCommand(by: #selector(NSResponder.deleteBackward(_:)))
+
+        XCTAssertEqual(view.document.root.content[0].type, "paragraph")
+        XCTAssertEqual(view.document.root.content[0].plainText, "# ")
+    }
+
+    func testBackspaceAfterInlineShortcutRestoresLiteralInMacView() {
+        let view = emptyParaMacView()
+        typeLive("*Italic*", into: view)
+        XCTAssertEqual(view.document.root.content[0].content.first?.marks, [.italic])
+
+        view.doCommand(by: #selector(NSResponder.deleteBackward(_:)))
+
+        XCTAssertEqual(view.document.root.content[0].plainText, "*Italic*")
+        XCTAssertEqual(view.document.root.content[0].content.map(\.marks), [[]])
+    }
 }
 #endif

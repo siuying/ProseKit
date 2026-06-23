@@ -12,6 +12,11 @@ public struct EditorState: Sendable {
     /// typed right after `*i*` would join the italic run. Cleared by the next
     /// edit or a selection change.
     public private(set) var pendingMarkRemovals: [Mark]
+    /// The literal document/selection from just before the most recent Input
+    /// Rule fired, kept so Backspace immediately after a shortcut restores the
+    /// typed Markdown (CONTEXT glossary: Input Rule). Cleared by the next edit
+    /// or a selection change, so a later Backspace deletes normally.
+    public private(set) var appliedInputRule: AppliedInputRule? = nil
     public private(set) var history: EditorHistory
     /// When false, local edits do not accumulate undo history. A collaboration
     /// binding sets this so the solo step history never records collaborative
@@ -78,6 +83,41 @@ public struct EditorState: Sendable {
         pendingMarkRemovals = marks
     }
 
+    /// Snapshots the pre-rule document/selection so the next Backspace can
+    /// restore the literal Markdown. Called by `InputRules.apply` right after a
+    /// rule transform succeeds (after its own dispatch cleared the slot).
+    mutating func recordAppliedInputRule(beforeDocument: Document, beforeSelection: TextSelection) {
+        appliedInputRule = AppliedInputRule(beforeDocument: beforeDocument, beforeSelection: beforeSelection)
+    }
+
+    /// Reverts the most recent Input Rule to the literal text the user typed,
+    /// matching Tiptap's `undoInputRule()`. Returns false when there is no
+    /// pending rule (already consumed, edited past, or the caret moved).
+    @discardableResult
+    public mutating func undoInputRule() -> Bool {
+        guard let applied = appliedInputRule else { return false }
+        appliedInputRule = nil
+        pendingMarkRemovals = []
+        typingMarks = []
+        // Relayout the restored block; a coarse but correct Changed Range, since
+        // a block-type revert (heading→paragraph) changes the block's height.
+        let info = applied.beforeDocument.blockInfo(containing: applied.beforeSelection.head)
+        let changed = info.map { $0.start..<($0.start + $0.node.nodeSize) }
+            ?? (applied.beforeSelection.head..<applied.beforeSelection.head)
+        document = applied.beforeDocument
+        selection = applied.beforeSelection
+        lastTransaction = AppliedTransaction(
+            document: document,
+            selection: selection,
+            origin: .local,
+            changedRange: changed
+        )
+        revision &+= 1
+        history.breakCoalescing()
+        history.invalidateRedo()
+        return true
+    }
+
     public mutating func deleteBackward() throws {
         if !selection.isCollapsed {
             try insertText("")
@@ -119,9 +159,11 @@ public struct EditorState: Sendable {
         selection = applied.selection
         lastTransaction = applied
         revision &+= 1
-        // Any applied edit consumes/clears a pending mark-removal; an inline
-        // mark rule re-arms it after its own dispatch.
+        // Any applied edit consumes/clears the pending mark-removal and the
+        // input-rule undo snapshot; an inline mark rule re-arms both after its
+        // own dispatch.
         pendingMarkRemovals = []
+        appliedInputRule = nil
         guard shouldRecord else { return }
         // Invert against the pre-edit document the steps were valid against.
         if let inverted = try? Self.invertedSteps(for: transaction.steps, against: beforeDocument) {

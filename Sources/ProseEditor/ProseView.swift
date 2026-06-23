@@ -333,6 +333,12 @@ import UIKit
     }
 
     public func deleteBackward() {
+        // Backspace immediately after a shortcut reverts it to the literal
+        // Markdown, ahead of any structural join or plain deletion.
+        if core.undoInputRule() {
+            relayoutAndDisplayEdit()
+            return
+        }
         do {
             // At a block's text start: join into the previous sibling, or — when
             // it is the first child of a container — lift it out of the container.

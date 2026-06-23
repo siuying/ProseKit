@@ -597,6 +597,30 @@ extension ProseViewTests {
         XCTAssertEqual(runs.map(\.text), ["a", "Code"])
         XCTAssertEqual(runs.map(\.marks), [[], [.code]])
     }
+
+    // MARK: - Immediate Backspace revert (Phase 4)
+
+    func testBackspaceAfterBlockShortcutRestoresLiteralInIOSView() {
+        let view = emptyParaIOSView()
+        view.insertText("# ")
+        XCTAssertEqual(view.document.root.content[0].type, "heading")
+
+        view.deleteBackward()
+
+        XCTAssertEqual(view.document.root.content[0].type, "paragraph")
+        XCTAssertEqual(view.document.root.content[0].plainText, "# ")
+    }
+
+    func testBackspaceAfterInlineShortcutRestoresLiteralInIOSView() {
+        let view = emptyParaIOSView()
+        typeLive("*Italic*", into: view)
+        XCTAssertEqual(view.document.root.content[0].content.first?.marks, [.italic])
+
+        view.deleteBackward()
+
+        XCTAssertEqual(view.document.root.content[0].plainText, "*Italic*")
+        XCTAssertEqual(view.document.root.content[0].content.map(\.marks), [[]])
+    }
 }
 
 private final class InputDelegateSpy: NSObject, UITextInputDelegate {
