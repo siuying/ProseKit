@@ -151,4 +151,54 @@ final class EditorCoreTests: XCTestCase {
         XCTAssertEqual(core.document.root.content[0].type, "paragraph")
         XCTAssertEqual(core.document.root.content[0].plainText, "a# ")
     }
+
+    // MARK: - Live inline mark rules (Phase 3)
+
+    private func emptyParagraphCore() -> EditorCore {
+        let core = EditorCore(document: Document(.doc([.paragraph([])])))
+        let start = core.document.endTextPosition
+        core.setSelection(TextSelection(anchor: start, head: start))
+        return core
+    }
+
+    func testTypingStarItalicProducesItalicRunLive() throws {
+        let core = emptyParagraphCore()
+        try core.insertText("*Italic*")
+        XCTAssertEqual(core.document.root.content[0].plainText, "Italic")
+        XCTAssertEqual(core.document.root.content[0].content.first?.marks, [.italic])
+    }
+
+    func testTypingBoldProducesBoldRunLive() throws {
+        let core = emptyParagraphCore()
+        try core.insertText("**Bold**")
+        XCTAssertEqual(core.document.root.content[0].plainText, "Bold")
+        XCTAssertEqual(core.document.root.content[0].content.first?.marks, [.bold])
+    }
+
+    func testTypingCodeLivePreservesPrecedingChar() throws {
+        let core = emptyParagraphCore()
+        try core.insertText("a`Code`")
+        XCTAssertEqual(core.document.root.content[0].plainText, "aCode")
+        let runs = core.document.root.content[0].content
+        XCTAssertEqual(runs.first?.marks, [])
+        XCTAssertEqual(runs.last?.marks, [.code])
+    }
+
+    func testCharacterTypedAfterInlineShortcutIsPlain() throws {
+        let core = emptyParagraphCore()
+        try core.insertText("*i*")   // becomes italic "i"
+        try core.insertText("x")     // the shortcut must not keep italic active
+        XCTAssertEqual(core.document.root.content[0].plainText, "ix")
+        let xRun = core.document.root.content[0].content.first { $0.text == "x" }
+        XCTAssertEqual(xRun?.marks ?? [], [])
+    }
+
+    func testCodeShortcutExcludesBoldViaMarkRules() throws {
+        let core = emptyParagraphCore()
+        XCTAssertTrue(core.run(Commands.toggleMark(.bold)))   // typing bold on
+        try core.insertText("`code`")
+        XCTAssertEqual(core.document.root.content[0].plainText, "code")
+        // Code excludes bold (MarkRules), so the run carries only code.
+        XCTAssertEqual(core.document.root.content[0].content.first?.marks, [.code])
+    }
 }
