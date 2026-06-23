@@ -129,16 +129,18 @@ final class EditorCoreTests: XCTestCase {
         XCTAssertEqual(core.document.root.content[0].plainText, "# ")
     }
 
-    func testReplacingASelectionWithTriggerDoesNotFireRule() throws {
+    func testReplacingASelectionWithTriggerFiresRuleOnResult() throws {
+        // ProseMirror parity: rules evaluate on the text before the caret after
+        // insertion, so replacing a whole-block selection with a trigger still
+        // completes the shortcut (this is also what makes replacement-range and
+        // autocomplete input work).
         let core = EditorCore(document: Document(.doc([.paragraph([.text("abc")])])))
         let start = try XCTUnwrap(core.document.position(ofTextInBlockAt: 0))
-        // Select the whole word, then "type" a trigger over it.
         core.setSelection(TextSelection(anchor: start, head: start + 3))
 
         try core.insertText("# ")
 
-        XCTAssertEqual(core.document.root.content[0].type, "paragraph")
-        XCTAssertEqual(core.document.root.content[0].plainText, "# ")
+        XCTAssertEqual(core.document.root.content[0].type, "heading")
     }
 
     func testTypingHashSpaceNotAtBlockStartStaysPlain() throws {
@@ -284,6 +286,28 @@ final class EditorCoreTests: XCTestCase {
         XCTAssertFalse(core.undo())
         XCTAssertEqual(core.document.root.content[0].type, "paragraph")
         XCTAssertEqual(core.document.root.content[0].plainText, "# ")
+    }
+
+    // MARK: - Composition / paste boundaries (Phase 5)
+
+    func testInsertingWithoutInputRulesLeavesTriggerLiteral() throws {
+        let core = emptyParagraphCore()
+        try core.insertText("# ", applyingInputRules: false)
+        XCTAssertEqual(core.document.root.content[0].type, "paragraph")
+        XCTAssertEqual(core.document.root.content[0].plainText, "# ")
+        // And no revert snapshot was armed, so Backspace deletes normally.
+        XCTAssertFalse(core.undoInputRule())
+    }
+
+    func testReplacementThenCommittedTriggerStillFires() throws {
+        // Simulates an autocomplete/replacement: text becomes "# " only after a
+        // replacement lands, and the rule must still fire on the result.
+        let core = EditorCore(document: Document(.doc([.paragraph([.text("#x")])])))
+        let start = try XCTUnwrap(core.document.position(ofTextInBlockAt: 0))
+        // Replace the "x" (the 2nd char) with a space, completing "# ".
+        core.setSelection(TextSelection(anchor: start + 1, head: start + 2))
+        try core.insertText(" ")
+        XCTAssertEqual(core.document.root.content[0].type, "heading")
     }
 
     func testUndoAfterInlineRevertRevertsLiteralTypingAndKeepsPriorHistory() throws {

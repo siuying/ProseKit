@@ -316,6 +316,13 @@ import UIKit
     }
 
     public func insertText(_ text: String) {
+        insertText(text, applyInputRules: true)
+    }
+
+    /// Shared insertion seam. Committed typing runs the markdown shortcuts;
+    /// IME/marked text and paste pass `applyInputRules: false` so a pasted or
+    /// mid-composition `# ` stays literal.
+    func insertText(_ text: String, applyInputRules: Bool) {
         // Every newline behaves like typing Return: it splits the block.
         let segments = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         for (index, segment) in segments.enumerated() {
@@ -323,13 +330,13 @@ import UIKit
                 runCommand(Commands.splitBlock())
             }
             if !segment.isEmpty || segments.count == 1 {
-                insertPlainText(segment)
+                insertPlainText(segment, applyInputRules: applyInputRules)
             }
         }
     }
 
-    private func insertPlainText(_ text: String) {
-        performEdit { try core.insertText(text) }
+    private func insertPlainText(_ text: String, applyInputRules: Bool) {
+        performEdit { try core.insertText(text, applyingInputRules: applyInputRules) }
     }
 
     public func deleteBackward() {
@@ -550,7 +557,9 @@ import UIKit
             runCommand(Commands.setLink(href: href))
             return
         }
-        performEditMenuEdit { insertText(text) }
+        // Paste is a sibling system to typing-time Input Rules: pasted Markdown
+        // is inserted verbatim, never run through the shortcuts.
+        performEditMenuEdit { insertText(text, applyInputRules: false) }
     }
 
     /// Runs a programmatic edit-menu edit (cut/paste) that moves the selection

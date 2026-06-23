@@ -58,7 +58,9 @@ extension ProseView {
 
     public func setMarkedText(_ markedText: String?, selectedRange: NSRange) {
         if let markedText {
-            insertText(markedText)
+            // Provisional IME composition: never run shortcuts until the text is
+            // committed (which arrives via insertText, not setMarkedText).
+            insertText(markedText, applyInputRules: false)
         }
     }
 
