@@ -271,4 +271,35 @@ final class EditorCoreTests: XCTestCase {
         XCTAssertEqual(core.document.root.content[0].type, "heading")
         XCTAssertEqual(core.document.root.content[0].plainText, "x")
     }
+
+    func testUndoAfterBlockRevertDoesNotReapplyStaleConversion() throws {
+        let core = emptyParagraphCore()
+        try core.insertText("# ")
+        XCTAssertTrue(core.undoInputRule())   // back to paragraph "# "
+
+        // The conversion's undo entry must be dropped along with its document
+        // change: Undo must never re-apply a stale heading inverse onto the
+        // already-restored paragraph. (The first insert into an empty paragraph
+        // is not itself recorded, so there is simply nothing left to undo.)
+        XCTAssertFalse(core.undo())
+        XCTAssertEqual(core.document.root.content[0].type, "paragraph")
+        XCTAssertEqual(core.document.root.content[0].plainText, "# ")
+    }
+
+    func testUndoAfterInlineRevertRevertsLiteralTypingAndKeepsPriorHistory() throws {
+        // A non-empty starting block so the literal insertion is recorded.
+        let core = EditorCore(document: Document(.doc([.paragraph([.text("hi ")])])))
+        let end = core.document.endTextPosition
+        core.setSelection(TextSelection(anchor: end, head: end))
+
+        try core.insertText("*x*")               // records the insert, then italicises
+        XCTAssertTrue(core.undoInputRule())      // back to literal "hi *x*"
+        XCTAssertEqual(core.document.root.content[0].plainText, "hi *x*")
+        XCTAssertEqual(core.document.root.content[0].content.map(\.marks), [[]])
+
+        // Prior history survives the revert: Undo removes the literal typing,
+        // not a corrupted/duplicated conversion.
+        XCTAssertTrue(core.undo())
+        XCTAssertEqual(core.document.root.content[0].plainText, "hi ")
+    }
 }

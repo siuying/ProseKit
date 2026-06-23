@@ -334,9 +334,10 @@ import UIKit
 
     public func deleteBackward() {
         // Backspace immediately after a shortcut reverts it to the literal
-        // Markdown, ahead of any structural join or plain deletion.
-        if core.undoInputRule() {
-            relayoutAndDisplayEdit()
+        // Markdown, ahead of any structural join or plain deletion. Routed
+        // through performEdit so the input delegate sees text will/did change.
+        if core.state.appliedInputRule != nil {
+            performEdit { _ = core.undoInputRule() }
             return
         }
         do {

@@ -177,9 +177,13 @@ public struct InputRule: Sendable {
 /// The literal document/selection captured just before an Input Rule fired, so
 /// Backspace immediately after a shortcut can restore the typed Markdown. The
 /// ProseKit analogue of Tiptap's input-rule plugin undo state.
-public struct AppliedInputRule: Sendable, Equatable {
+public struct AppliedInputRule: Sendable {
     public var beforeDocument: Document
     public var beforeSelection: TextSelection
+    /// The undo history as it stood before the rule transform, so reverting also
+    /// drops the transform's own undo entry (otherwise a later Undo would apply
+    /// the conversion's stale inverse to the already-restored literal text).
+    var beforeHistory: EditorHistory
 }
 
 public enum InputRules {
@@ -284,8 +288,13 @@ public enum InputRules {
                 // since the transform's own dispatch clears the slot.
                 let beforeDocument = state.document
                 let beforeSelection = state.selection
+                let beforeHistory = state.history
                 try rule.transform(&state, match, blockTextStart)
-                state.recordAppliedInputRule(beforeDocument: beforeDocument, beforeSelection: beforeSelection)
+                state.recordAppliedInputRule(
+                    beforeDocument: beforeDocument,
+                    beforeSelection: beforeSelection,
+                    beforeHistory: beforeHistory
+                )
                 return true
             }
         }

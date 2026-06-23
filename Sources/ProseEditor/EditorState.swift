@@ -86,8 +86,12 @@ public struct EditorState: Sendable {
     /// Snapshots the pre-rule document/selection so the next Backspace can
     /// restore the literal Markdown. Called by `InputRules.apply` right after a
     /// rule transform succeeds (after its own dispatch cleared the slot).
-    mutating func recordAppliedInputRule(beforeDocument: Document, beforeSelection: TextSelection) {
-        appliedInputRule = AppliedInputRule(beforeDocument: beforeDocument, beforeSelection: beforeSelection)
+    mutating func recordAppliedInputRule(beforeDocument: Document, beforeSelection: TextSelection, beforeHistory: EditorHistory) {
+        appliedInputRule = AppliedInputRule(
+            beforeDocument: beforeDocument,
+            beforeSelection: beforeSelection,
+            beforeHistory: beforeHistory
+        )
     }
 
     /// Reverts the most recent Input Rule to the literal text the user typed,
@@ -106,6 +110,11 @@ public struct EditorState: Sendable {
             ?? (applied.beforeSelection.head..<applied.beforeSelection.head)
         document = applied.beforeDocument
         selection = applied.beforeSelection
+        // Restore the pre-rule history so the transform's own undo entry is
+        // dropped along with its document change; a later Undo then reverts the
+        // literal typing, not a stale conversion inverse.
+        history = applied.beforeHistory
+        history.breakCoalescing()
         lastTransaction = AppliedTransaction(
             document: document,
             selection: selection,
@@ -113,8 +122,6 @@ public struct EditorState: Sendable {
             changedRange: changed
         )
         revision &+= 1
-        history.breakCoalescing()
-        history.invalidateRedo()
         return true
     }
 
