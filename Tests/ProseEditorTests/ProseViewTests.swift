@@ -533,6 +533,33 @@ final class ProseViewTests: XCTestCase {
 }
 
 @MainActor
+@MainActor
+extension ProseViewTests {
+    // MARK: - Live block input rules (Phase 1)
+
+    func testTypingHashSpaceConvertsToHeadingInIOSView() {
+        let view = makeView(Document(.doc([.paragraph([])])))
+        let start = view.core.document.endTextPosition
+        view.selectedTextRange = ProseTextRange(anchor: start, head: start)
+
+        view.insertText("# ")
+
+        XCTAssertEqual(view.document.root.content[0].type, "heading")
+        XCTAssertEqual(view.document.root.content[0].attrs["level"], .int(1))
+        XCTAssertEqual(view.document.root.content[0].plainText, "")
+    }
+
+    func testTypingGtSpaceWrapsInBlockquoteInIOSView() {
+        let view = makeView(Document(.doc([.paragraph([])])))
+        let start = view.core.document.endTextPosition
+        view.selectedTextRange = ProseTextRange(anchor: start, head: start)
+
+        view.insertText("> ")
+
+        XCTAssertEqual(view.document.root.content[0].type, "blockquote")
+    }
+}
+
 private final class InputDelegateSpy: NSObject, UITextInputDelegate {
     enum Event: Equatable {
         case selectionWillChange, selectionDidChange, textWillChange, textDidChange

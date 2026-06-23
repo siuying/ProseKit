@@ -525,4 +525,38 @@ private final class TestValidatedItem: NSObject, NSValidatedUserInterfaceItem {
         self.action = action
     }
 }
+
+@MainActor
+extension MacProseViewTests {
+    // MARK: - Live block input rules (Phase 1)
+
+    private func makeMacView(_ document: Document) -> ProseView {
+        let view = ProseView(document: document)
+        view.frame = CGRect(x: 0, y: 0, width: 320, height: 120)
+        view.layoutSubtreeIfNeeded()
+        return view
+    }
+
+    func testTypingHashSpaceConvertsToHeadingInMacView() {
+        let view = makeMacView(Document(.doc([.paragraph([])])))
+        let start = view.core.document.endTextPosition
+        view.core.setSelection(TextSelection(anchor: start, head: start))
+
+        view.insertText("# ", replacementRange: NSRange(location: NSNotFound, length: 0))
+
+        XCTAssertEqual(view.document.root.content[0].type, "heading")
+        XCTAssertEqual(view.document.root.content[0].attrs["level"], .int(1))
+        XCTAssertEqual(view.document.root.content[0].plainText, "")
+    }
+
+    func testTypingGtSpaceWrapsInBlockquoteInMacView() {
+        let view = makeMacView(Document(.doc([.paragraph([])])))
+        let start = view.core.document.endTextPosition
+        view.core.setSelection(TextSelection(anchor: start, head: start))
+
+        view.insertText("> ", replacementRange: NSRange(location: NSNotFound, length: 0))
+
+        XCTAssertEqual(view.document.root.content[0].type, "blockquote")
+    }
+}
 #endif
