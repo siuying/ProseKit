@@ -58,6 +58,93 @@ public struct InputRule: Sendable {
         self.transform = transform
     }
 
+    /// An inline mark rule for a symmetric delimiter (e.g. `*`, `**`, `` ` ``,
+    /// `~~`). A suffix finder matches `delimiter + content + delimiter` ending at
+    /// the caret (not consuming any preceding text), then the transform deletes
+    /// both delimiters and adds `mark` over the content — ProseKit's analogue of
+    /// Tiptap's `markInputRule`. Mark coexistence still flows through
+    /// `MarkRules`/`AddMarkStep`.
+    static func mark(
+        delimiter: String,
+        mark: Mark,
+        rejectWhitespaceOnlyContent: Bool = true,
+        rejectOpeningPrecededBy: Character? = nil
+    ) -> InputRule {
+        InputRule(
+            find: { before in
+                markSuffixMatch(
+                    in: before,
+                    delimiter: delimiter,
+                    rejectWhitespaceOnlyContent: rejectWhitespaceOnlyContent,
+                    rejectOpeningPrecededBy: rejectOpeningPrecededBy
+                )
+            },
+            transform: { state, match, blockTextStart in
+                let dlen = delimiter.count
+                let s = blockTextStart + match.range.lowerBound
+                let e = blockTextStart + match.range.upperBound
+                let openEnd = s + dlen
+                let closeStart = e - dlen
+                // Steps apply sequentially: drop the closing delimiter, then the
+                // opening one (which shifts the content left by `dlen`), then add
+                // the Mark over the shifted content. Caret lands after it.
+                let markedEnd = closeStart - dlen
+                try state.dispatch(Transaction(
+                    steps: [
+                        ReplaceStep(from: closeStart, to: e, insertText: ""),
+                        ReplaceStep(from: s, to: openEnd, insertText: ""),
+                        AddMarkStep(from: s, to: markedEnd, mark: mark),
+                    ],
+                    selection: TextSelection(anchor: markedEnd, head: markedEnd),
+                    origin: .local
+                ))
+            }
+        )
+    }
+
+    /// Finds `delimiter + content + delimiter` anchored at the end of `text`,
+    /// returning the matched suffix span (delimiters included) and its inner
+    /// content range. Content may not contain a delimiter character and must be
+    /// non-empty; `rejectWhitespaceOnlyContent` and `rejectOpeningPrecededBy`
+    /// add the per-rule guards (whitespace-only content, a preceding backtick).
+    static func markSuffixMatch(
+        in text: String,
+        delimiter: String,
+        rejectWhitespaceOnlyContent: Bool,
+        rejectOpeningPrecededBy: Character?
+    ) -> InputRuleMatch? {
+        let chars = Array(text)
+        let delim = Array(delimiter)
+        let dlen = delim.count
+        let n = chars.count
+        // Need both delimiters plus at least one content character.
+        guard dlen > 0, n >= 2 * dlen + 1 else { return nil }
+        // Must end with the delimiter.
+        guard Array(chars.suffix(dlen)) == delim else { return nil }
+        let closeStart = n - dlen
+        // Content carries no delimiter character, so scan left from the closing
+        // delimiter until the first delimiter character: that is the opening
+        // delimiter's final character.
+        let delimChars = Set(delim)
+        var i = closeStart - 1
+        while i >= 0, !delimChars.contains(chars[i]) { i -= 1 }
+        guard i >= 0 else { return nil }
+        let openEnd = i + 1
+        let openStart = openEnd - dlen
+        guard openStart >= 0, Array(chars[openStart..<openEnd]) == delim else { return nil }
+        let content = Array(chars[openEnd..<closeStart])
+        guard !content.isEmpty else { return nil }
+        if rejectWhitespaceOnlyContent, content.allSatisfy(\.isWhitespace) { return nil }
+        if let pc = rejectOpeningPrecededBy, openStart - 1 >= 0, chars[openStart - 1] == pc {
+            return nil
+        }
+        return InputRuleMatch(
+            range: openStart..<n,
+            contentRange: openEnd..<closeStart,
+            text: String(chars[openStart..<n])
+        )
+    }
+
     /// An exact block trigger: matches only when the entire text before the
     /// caret equals `trigger` (i.e. typed at the block start). The transform is
     /// expressed in absolute `from`/`to` positions for convenience, matching the
@@ -84,9 +171,26 @@ public struct InputRule: Sendable {
 }
 
 public enum InputRules {
-    /// The StarterKit block rules available today. List / codeBlock / task rules
-    /// join as those node types land (slices 12, 14, 15).
-    public static let starterKit: [InputRule] = headingRules + [blockquoteRule] + bulletListRules + [orderedListRule]
+    /// The StarterKit rules available today: block shortcuts first, then the
+    /// inline mark shortcuts. List / codeBlock / task rules join as those node
+    /// types land (slices 12, 14, 15).
+    public static let starterKit: [InputRule] =
+        headingRules + [blockquoteRule] + bulletListRules + [orderedListRule] + markRules
+
+    /// Inline mark shortcuts. Bold (`**`/`__`) precede italic (`*`/`_`) so a
+    /// double-delimiter run resolves to bold, not nested italic. Code rejects a
+    /// preceding backtick; code/bold/italic exclusions still come from MarkRules.
+    static let markRules: [InputRule] = [
+        .mark(delimiter: "**", mark: .bold),
+        .mark(delimiter: "__", mark: .bold),
+        .mark(delimiter: "~~", mark: .strike),
+        // Reject an opening delimiter preceded by the same character so a
+        // malformed `**Bold*` / `__Bold_` tail stays literal instead of
+        // italicising from the second delimiter (Tiptap parity).
+        .mark(delimiter: "*", mark: .italic, rejectOpeningPrecededBy: "*"),
+        .mark(delimiter: "_", mark: .italic, rejectOpeningPrecededBy: "_"),
+        .mark(delimiter: "`", mark: .code, rejectWhitespaceOnlyContent: false, rejectOpeningPrecededBy: "`"),
+    ]
 
     /// `> ` at a paragraph's start wraps it in a blockquote.
     static let blockquoteRule = InputRule.exactBlock(trigger: "> ") { state, from, to in

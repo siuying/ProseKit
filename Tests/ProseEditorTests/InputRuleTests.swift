@@ -79,4 +79,118 @@ final class InputRuleTests: XCTestCase {
         XCTAssertNil(rule.find("a> "))
         XCTAssertNil(rule.find("> x"))
     }
+
+    // MARK: - Inline mark rules (Phase 2)
+
+    /// The single text run of the (only) block, with its marks.
+    private func firstRun(_ s: EditorState) -> Node? {
+        s.document.root.content.first?.content.first
+    }
+
+    func testStarBecomesItalic() throws {
+        var s = state("*Italic*")
+        XCTAssertTrue(try InputRules.apply(InputRules.starterKit, to: &s))
+        XCTAssertEqual(s.document.root.content[0].plainText, "Italic")
+        XCTAssertEqual(firstRun(s)?.marks, [.italic])
+    }
+
+    func testUnderscoreBecomesItalic() throws {
+        var s = state("_Italic_")
+        XCTAssertTrue(try InputRules.apply(InputRules.starterKit, to: &s))
+        XCTAssertEqual(s.document.root.content[0].plainText, "Italic")
+        XCTAssertEqual(firstRun(s)?.marks, [.italic])
+    }
+
+    func testDoubleStarBecomesBold() throws {
+        var s = state("**Bold**")
+        XCTAssertTrue(try InputRules.apply(InputRules.starterKit, to: &s))
+        XCTAssertEqual(s.document.root.content[0].plainText, "Bold")
+        XCTAssertEqual(firstRun(s)?.marks, [.bold])
+    }
+
+    func testDoubleUnderscoreBecomesBold() throws {
+        var s = state("__Bold__")
+        XCTAssertTrue(try InputRules.apply(InputRules.starterKit, to: &s))
+        XCTAssertEqual(s.document.root.content[0].plainText, "Bold")
+        XCTAssertEqual(firstRun(s)?.marks, [.bold])
+    }
+
+    func testBacktickBecomesCode() throws {
+        var s = state("`Code`")
+        XCTAssertTrue(try InputRules.apply(InputRules.starterKit, to: &s))
+        XCTAssertEqual(s.document.root.content[0].plainText, "Code")
+        XCTAssertEqual(firstRun(s)?.marks, [.code])
+    }
+
+    func testTildeBecomesStrike() throws {
+        var s = state("~~Strike~~")
+        XCTAssertTrue(try InputRules.apply(InputRules.starterKit, to: &s))
+        XCTAssertEqual(s.document.root.content[0].plainText, "Strike")
+        XCTAssertEqual(firstRun(s)?.marks, [.strike])
+    }
+
+    func testEmptyDelimiterPairsDoNotFire() throws {
+        for text in ["**", "____", "``", "~~~~"] {
+            var s = state(text)
+            XCTAssertFalse(try InputRules.apply(InputRules.starterKit, to: &s), "\(text) should not fire")
+            XCTAssertEqual(s.document.root.content[0].plainText, text)
+        }
+    }
+
+    func testWhitespaceOnlyContentDoesNotFire() throws {
+        var s = state("* *")
+        XCTAssertFalse(try InputRules.apply(InputRules.starterKit, to: &s))
+        XCTAssertEqual(s.document.root.content[0].plainText, "* *")
+    }
+
+    func testPrecedingCharBeforeCodeIsPreserved() throws {
+        var s = state("a`Code`")
+        XCTAssertTrue(try InputRules.apply(InputRules.starterKit, to: &s))
+        XCTAssertEqual(s.document.root.content[0].plainText, "aCode")
+        let runs = s.document.root.content[0].content
+        XCTAssertEqual(runs.count, 2)
+        XCTAssertEqual(runs[0].text, "a")
+        XCTAssertEqual(runs[0].marks, [])
+        XCTAssertEqual(runs[1].text, "Code")
+        XCTAssertEqual(runs[1].marks, [.code])
+    }
+
+    func testDoubleBacktickDoesNotFireCode() throws {
+        // The opening backtick is preceded by a backtick: Tiptap's code rule
+        // rejects this so ``x` stays literal.
+        var s = state("``Code`")
+        XCTAssertFalse(try InputRules.apply(InputRules.starterKit, to: &s))
+        XCTAssertEqual(s.document.root.content[0].plainText, "``Code`")
+    }
+
+    func testOnlyFinalPairTransforms() throws {
+        // `*a*b*`: only the trailing `*b*` becomes italic; the leading `*a` is
+        // preserved literally.
+        var s = state("*a*b*")
+        XCTAssertTrue(try InputRules.apply(InputRules.starterKit, to: &s))
+        XCTAssertEqual(s.document.root.content[0].plainText, "*ab")
+        let runs = s.document.root.content[0].content
+        XCTAssertEqual(runs.last?.text, "b")
+        XCTAssertEqual(runs.last?.marks, [.italic])
+    }
+
+    func testMalformedDoubleStarTailStaysLiteral() throws {
+        // `**Bold*` (one trailing star) must not italicise from the second star.
+        var s = state("**Bold*")
+        XCTAssertFalse(try InputRules.apply(InputRules.starterKit, to: &s))
+        XCTAssertEqual(s.document.root.content[0].plainText, "**Bold*")
+    }
+
+    func testInlineRuleIsANoopWhenBlockTextSpansMarkRuns() throws {
+        // Phase 2 keeps inline matches inside a single text node. When the
+        // block already carries a split mark run before the caret, the matcher
+        // can't read across runs, so the rule is a graceful no-op (no crash,
+        // document untouched) rather than a partial transform.
+        var s = EditorState(
+            document: Document(.doc([.paragraph([.text("x", marks: [.bold]), .text("*i*")])])),
+            selection: TextSelection(anchor: 6, head: 6)
+        )
+        XCTAssertFalse(try InputRules.apply(InputRules.starterKit, to: &s))
+        XCTAssertEqual(s.document.root.content[0].plainText, "x*i*")
+    }
 }
