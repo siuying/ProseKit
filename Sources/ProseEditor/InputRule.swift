@@ -98,6 +98,10 @@ public struct InputRule: Sendable {
                     selection: TextSelection(anchor: markedEnd, head: markedEnd),
                     origin: .local
                 ))
+                // The caret now sits at the end of the marked run; without this
+                // the next typed character would inherit the Mark. Clear it so
+                // typing after the shortcut is plain (ProseMirror parity).
+                state.recordPendingMarkRemovals([mark])
             }
         )
     }

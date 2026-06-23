@@ -6,6 +6,12 @@ public struct EditorState: Sendable {
     public private(set) var selection: TextSelection
     public private(set) var lastTransaction: AppliedTransaction?
     public private(set) var typingMarks: [Mark]
+    /// Marks to strip from the next caret insertion so typing after an inline
+    /// mark Input Rule is plain (ProseMirror's `removeStoredMark`). Empty typing
+    /// marks otherwise inherit the left run's Marks, so without this a character
+    /// typed right after `*i*` would join the italic run. Cleared by the next
+    /// edit or a selection change.
+    public private(set) var pendingMarkRemovals: [Mark]
     public private(set) var history: EditorHistory
     /// When false, local edits do not accumulate undo history. A collaboration
     /// binding sets this so the solo step history never records collaborative
@@ -23,6 +29,7 @@ public struct EditorState: Sendable {
         selection: TextSelection? = nil,
         lastTransaction: AppliedTransaction? = nil,
         typingMarks: [Mark] = [],
+        pendingMarkRemovals: [Mark] = [],
         history: EditorHistory = EditorHistory(),
         recordsHistory: Bool = true,
         revision: Int = 0
@@ -31,6 +38,7 @@ public struct EditorState: Sendable {
         self.selection = selection ?? TextSelection(anchor: document.endTextPosition, head: document.endTextPosition)
         self.lastTransaction = lastTransaction
         self.typingMarks = typingMarks
+        self.pendingMarkRemovals = pendingMarkRemovals
         self.history = history
         self.recordsHistory = recordsHistory
         self.revision = revision
@@ -40,16 +48,34 @@ public struct EditorState: Sendable {
         let from = min(selection.anchor, selection.head)
         let to = max(selection.anchor, selection.head)
         let head = from + text.count
+        let collapsed = from == to
         // Pending typing Marks ride on the Step itself; they only apply at a
         // collapsed caret (replacing a selection types plain).
+        var steps: [any Step] = [
+            ReplaceStep(from: from, to: to, insertText: text, insertMarks: collapsed ? typingMarks : []),
+        ]
+        // A caret insertion with no typing Marks inherits the left run's Marks.
+        // Strip the Marks the last input rule cleared so the text typed right
+        // after a shortcut is plain. Same Transaction, so it is one undo step.
+        if collapsed, typingMarks.isEmpty, !text.isEmpty {
+            for mark in pendingMarkRemovals {
+                steps.append(RemoveMarkStep(from: from, to: head, mark: mark))
+            }
+        }
         try dispatch(
             Transaction(
-                steps: [ReplaceStep(from: from, to: to, insertText: text, insertMarks: from == to ? typingMarks : [])],
+                steps: steps,
                 selection: TextSelection(anchor: head, head: head),
                 origin: .local
             ),
-            coalescing: from == to && !text.isEmpty ? .typing : .none
+            coalescing: collapsed && !text.isEmpty ? .typing : .none
         )
+    }
+
+    /// Records the Marks to strip from the next caret insertion. An inline mark
+    /// Input Rule calls this so the character typed after the shortcut is plain.
+    mutating func recordPendingMarkRemovals(_ marks: [Mark]) {
+        pendingMarkRemovals = marks
     }
 
     public mutating func deleteBackward() throws {
@@ -93,6 +119,9 @@ public struct EditorState: Sendable {
         selection = applied.selection
         lastTransaction = applied
         revision &+= 1
+        // Any applied edit consumes/clears a pending mark-removal; an inline
+        // mark rule re-arms it after its own dispatch.
+        pendingMarkRemovals = []
         guard shouldRecord else { return }
         // Invert against the pre-edit document the steps were valid against.
         if let inverted = try? Self.invertedSteps(for: transaction.steps, against: beforeDocument) {
@@ -156,6 +185,11 @@ public struct EditorState: Sendable {
         }
         if !typingMarks.isEmpty {
             return typingMarks.contains(mark)
+        }
+        // An inline mark Input Rule cleared this Mark for the next insertion, so
+        // the next typed character is plain: report inactive to match.
+        if pendingMarkRemovals.contains(mark) {
+            return false
         }
         guard lower > 0, let info = document.blockInfo(containing: lower), lower > info.start + 1 else {
             return false

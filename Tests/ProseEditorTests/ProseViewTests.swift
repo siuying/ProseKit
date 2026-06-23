@@ -568,32 +568,34 @@ extension ProseViewTests {
         return view
     }
 
+    private func typeLive(_ text: String, into view: ProseView) {
+        for character in text { view.insertText(String(character)) }
+    }
+
     func testTypingStarItalicLeavesTrailingSpacePlainInIOSView() {
         let view = emptyParaIOSView()
 
-        view.insertText("*Italic*")
-        view.insertText(" ")
+        typeLive("*Italic* ", into: view)
 
-        XCTAssertEqual(view.document.root.content[0].plainText, "Italic ")
         let runs = view.document.root.content[0].content
-        XCTAssertEqual(runs.first?.marks, [.italic])
-        XCTAssertEqual(runs.first(where: { $0.text == " " })?.marks ?? [], [])
+        XCTAssertEqual(runs.map(\.text), ["Italic", " "])
+        XCTAssertEqual(runs.map(\.marks), [[.italic], []])
     }
 
     func testTypingBoldInIOSView() {
         let view = emptyParaIOSView()
-        view.insertText("**Bold**")
-        XCTAssertEqual(view.document.root.content[0].plainText, "Bold")
-        XCTAssertEqual(view.document.root.content[0].content.first?.marks, [.bold])
+        typeLive("**Bold**", into: view)
+        let runs = view.document.root.content[0].content
+        XCTAssertEqual(runs.map(\.text), ["Bold"])
+        XCTAssertEqual(runs.map(\.marks), [[.bold]])
     }
 
     func testTypingCodePreservesPrecedingCharInIOSView() {
         let view = emptyParaIOSView()
-        view.insertText("a`Code`")
-        XCTAssertEqual(view.document.root.content[0].plainText, "aCode")
+        typeLive("a`Code`", into: view)
         let runs = view.document.root.content[0].content
-        XCTAssertEqual(runs.first?.marks, [])
-        XCTAssertEqual(runs.last?.marks, [.code])
+        XCTAssertEqual(runs.map(\.text), ["a", "Code"])
+        XCTAssertEqual(runs.map(\.marks), [[], [.code]])
     }
 }
 
