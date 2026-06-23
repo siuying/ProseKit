@@ -34,15 +34,14 @@ public enum EditorEditAction {
     /// opaquely rather than reinterpreting them.
     public let schema: Schema
 
-    /// When true, text typed through `insertText` is run past the StarterKit
-    /// Input Rules (markdown shortcuts) after insertion. Defaults to enabled,
-    /// matching Tiptap.
+    /// When true, committed text typed through `insertText` is run past the
+    /// StarterKit Input Rules (markdown shortcuts) after insertion. Defaults to
+    /// enabled, matching Tiptap.
     ///
-    /// Composition/marked text DOES currently reach this seam (the shells route
-    /// `setMarkedText` through `insertText`); suppressing rules until input is
-    /// committed is owned by the composition slice (Phase 5). Rules only fire at
-    /// a caret that was collapsed before insertion — replacing a selection types
-    /// plain.
+    /// IME/marked text and paste pass `applyingInputRules: false`, so shortcuts
+    /// only fire on committed typing. Rules evaluate on the text before the
+    /// caret after insertion (replacement-range input can also complete a
+    /// shortcut).
     public var inputRulesEnabled = true
 
     public init(document: Document, schema: Schema = .slice1) {
