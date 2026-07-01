@@ -61,4 +61,22 @@ final class InputRuleTests: XCTestCase {
         XCTAssertFalse(try InputRules.apply(InputRules.starterKit, to: &s))
         XCTAssertEqual(s.document.root.content[0].type, "paragraph")
     }
+
+    // MARK: - Finder API (Phase 0)
+
+    func testExactFinderMatchesWholeBlockText() {
+        let rule = InputRule.exactBlock(trigger: "> ") { _, _, _ in }
+        let match = rule.find("> ")
+        XCTAssertEqual(match?.range, 0..<2)
+        XCTAssertEqual(match?.text, "> ")
+        XCTAssertNil(match?.contentRange)
+    }
+
+    func testExactFinderRejectsPartialAndTrailing() {
+        let rule = InputRule.exactBlock(trigger: "> ") { _, _, _ in }
+        XCTAssertNil(rule.find(">"))
+        XCTAssertNil(rule.find(" > "))
+        XCTAssertNil(rule.find("a> "))
+        XCTAssertNil(rule.find("> x"))
+    }
 }

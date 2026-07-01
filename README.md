@@ -130,6 +130,15 @@ let editor = ProseView(document: document)
 let exported = try JSONEncoder().encode(editor.document)
 ```
 
+### Persist or collaborate with Yjs
+
+The `ProseKitYjs` product persists content as a Yjs (SwiftYrs) update blob and
+converges an editor with a `YDoc` — for local single-writer storage or mergeable
+multi-device collaboration. See
+[`docs/embedding-yjs-persistence.md`](./docs/embedding-yjs-persistence.md) for the
+blob round-trip, the per-platform `ProseView` surface, and when to bind a live
+`YBinding` vs. re-encode on save.
+
 ### Use the model on its own
 
 `ProseModel` has no UIKit dependency, so it builds and runs anywhere — useful for
