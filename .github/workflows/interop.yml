@@ -1,0 +1,71 @@
+name: Yjs interop
+
+# Proves ProseKitYjs converges with the real y-prosemirror library (the same
+# binding Tiptap drives in the browser), headless, on every push/PR. No manual
+# browser or server step: a Node process runs the JS peer and `swift test`
+# drives the Swift YBinding, exchanging standard Yjs v1 update bytes.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: interop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  interop:
+    # macOS host: the interop suite is `#if os(macOS)` (it spawns a Node
+    # subprocess via Foundation.Process) and SwiftYrs vends a prebuilt
+    # xcframework on Apple platforms. `macos-26` mirrors SwiftYrs' own CI, the
+    # proven environment for building its FFI xcframework with stable Rust.
+    runs-on: macos-26
+    steps:
+      # ProseKit's Package.swift references SwiftYrs by a sibling path
+      # (`../SwiftYrs`), so check both repos out side by side.
+      - name: Checkout ProseKit
+        uses: actions/checkout@v4
+        with:
+          path: ProseKit
+
+      - name: Checkout SwiftYrs
+        uses: actions/checkout@v4
+        with:
+          repository: siuying/SwiftYrs
+          ref: main
+          path: SwiftYrs
+
+      # No xcode-select: the macos-26 runner default already provides the
+      # Swift 6.2 toolchain SwiftYrs and ProseKit build against.
+      - name: Set up Rust (for the SwiftYrs FFI xcframework)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,aarch64-apple-ios,aarch64-apple-ios-sim
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            SwiftYrs/native/yrs-bridge/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('SwiftYrs/native/yrs-bridge/Cargo.lock') }}
+
+      - name: Build SwiftYrs xcframework
+        working-directory: SwiftYrs
+        run: ./scripts/build-xcframework.sh
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install interop peer dependencies
+        working-directory: ProseKit/Tests/Interop
+        run: npm ci
+
+      - name: Run Yjs interop convergence tests
+        working-directory: ProseKit
+        run: swift test --filter YBindingInteropTests

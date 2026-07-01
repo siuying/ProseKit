@@ -7,6 +7,8 @@
 // converging here is a genuine cross-implementation convergence proof.
 //
 // Modes:
+//   fragment                  Print the root XML-fragment field name the peer
+//                             keys the shared type on ("prosemirror").
 //   encode <text> <outFile>   Build doc>paragraph>text(text) as a y-prosemirror
 //                             Y.Doc on fragment "prosemirror" and write its v1
 //                             update bytes to <outFile>. (JS -> Swift)
@@ -75,7 +77,12 @@ function plainText(json) {
 
 const [mode, ...rest] = process.argv.slice(2);
 
-if (mode === "encode") {
+if (mode === "fragment") {
+  // Print the root XML-fragment field name the JS peer keys the shared type on.
+  // The Swift side asserts YBinding.defaultFragmentName matches this, so a
+  // rename on either peer fails loudly instead of silently never converging.
+  process.stdout.write(FRAGMENT);
+} else if (mode === "encode") {
   const [text, outFile] = rest;
   const ydoc = prosemirrorToYDoc(paragraphDoc(text), FRAGMENT);
   writeFileSync(outFile, Buffer.from(Y.encodeStateAsUpdate(ydoc)));

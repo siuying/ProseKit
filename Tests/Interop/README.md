@@ -20,9 +20,15 @@ npm install
 `node_modules` are absent, e.g. in a network-restricted CI). Point it at a specific
 Node with the `NODE_BINARY` environment variable.
 
+In CI this is wired by [`.github/workflows/interop.yml`](../../.github/workflows/interop.yml),
+which checks out `SwiftYrs` as a sibling, builds its FFI xcframework, `npm ci`s
+this fixture, and runs `swift test --filter YBindingInteropTests` — no manual
+browser or server step.
+
 ## Modes
 
 ```sh
+node interop.mjs fragment                    # print the shared root fragment name ("prosemirror")
 node interop.mjs encode "<text>" <outFile>   # build a y-prosemirror update  (JS -> Swift)
 node interop.mjs decode <inFile>             # print text from a Swift update (Swift -> JS)
 ```
