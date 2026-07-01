@@ -151,4 +151,83 @@ final class EditorCoreTests: XCTestCase {
         XCTAssertEqual(core.document.root.content[0].type, "paragraph")
         XCTAssertEqual(core.document.root.content[0].plainText, "a# ")
     }
+
+    // MARK: - Live inline mark rules (Phase 3)
+
+    private func emptyParagraphCore() -> EditorCore {
+        let core = EditorCore(document: Document(.doc([.paragraph([])])))
+        let start = core.document.endTextPosition
+        core.setSelection(TextSelection(anchor: start, head: start))
+        return core
+    }
+
+    /// Types `text` one character at a time through the live seam, so each
+    /// keystroke runs the input-rule pass exactly as the keyboard would.
+    private func typeLive(_ text: String, into core: EditorCore) throws {
+        for character in text { try core.insertText(String(character)) }
+    }
+
+    private func runs(_ core: EditorCore) -> [Node] {
+        core.document.root.content[0].content
+    }
+
+    func testTypingStarItalicConvertsOnlyAfterClosingDelimiterLive() throws {
+        let core = emptyParagraphCore()
+        try typeLive("*Italic", into: core)
+        XCTAssertEqual(core.document.root.content[0].plainText, "*Italic",
+                       "no conversion until the closing delimiter is typed")
+
+        try core.insertText("*")
+        XCTAssertEqual(runs(core).map(\.text), ["Italic"])
+        XCTAssertEqual(runs(core).map(\.marks), [[.italic]])
+    }
+
+    func testTypingBoldProducesBoldRunLive() throws {
+        let core = emptyParagraphCore()
+        try typeLive("**Bold**", into: core)
+        XCTAssertEqual(runs(core).map(\.text), ["Bold"])
+        XCTAssertEqual(runs(core).map(\.marks), [[.bold]])
+    }
+
+    func testTypingCodeLivePreservesPrecedingChar() throws {
+        let core = emptyParagraphCore()
+        try typeLive("a`Code`", into: core)
+        XCTAssertEqual(runs(core).map(\.text), ["a", "Code"])
+        XCTAssertEqual(runs(core).map(\.marks), [[], [.code]])
+    }
+
+    func testCharacterTypedAfterInlineShortcutIsPlain() throws {
+        let core = emptyParagraphCore()
+        try typeLive("*i*x", into: core)   // `*i*` italicises `i`, then `x` is typed
+        XCTAssertEqual(runs(core).map(\.text), ["i", "x"])
+        XCTAssertEqual(runs(core).map(\.marks), [[.italic], []])
+    }
+
+    func testCodeShortcutExcludesBoldViaMarkRules() throws {
+        let core = emptyParagraphCore()
+        XCTAssertTrue(core.run(Commands.toggleMark(.bold)))   // typing bold on
+        // The whole token arrives as one committed run (one text node) so the
+        // rule can match; char-by-char with an active toolbar Mark splits into
+        // unmerged runs and hits the single-text-node limit (Phase 2 scope).
+        try core.insertText("`code`")
+        // The code rule's AddMarkStep adds code, and MarkRules drops the
+        // excluded bold, so the run carries only code.
+        XCTAssertEqual(runs(core).map(\.text), ["code"])
+        XCTAssertEqual(runs(core).map(\.marks), [[.code]])
+    }
+
+    func testTypingAfterInlineShortcutWithTrailingSpaceIsPlain() throws {
+        let core = emptyParagraphCore()
+        try typeLive("*Italic* ", into: core)
+        XCTAssertEqual(runs(core).map(\.text), ["Italic", " "])
+        XCTAssertEqual(runs(core).map(\.marks), [[.italic], []])
+    }
+
+    func testToolbarMarkReadsInactiveRightAfterInlineShortcut() throws {
+        let core = emptyParagraphCore()
+        try core.insertText("*i*")   // italicises "i"; next char must be plain
+        // Toolbar/active-state must agree with the plain-next-char behavior,
+        // even though the caret sits to the right of an italic run.
+        XCTAssertFalse(core.state.isActive(.italic))
+    }
 }

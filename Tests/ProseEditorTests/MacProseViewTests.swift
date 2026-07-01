@@ -558,5 +558,48 @@ extension MacProseViewTests {
 
         XCTAssertEqual(view.document.root.content[0].type, "blockquote")
     }
+
+    // MARK: - Live inline mark rules (Phase 3)
+
+    private func emptyParaMacView() -> ProseView {
+        let view = makeMacView(Document(.doc([.paragraph([])])))
+        let start = view.core.document.endTextPosition
+        view.core.setSelection(TextSelection(anchor: start, head: start))
+        return view
+    }
+
+    private func type(_ text: String, into view: ProseView) {
+        view.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
+    }
+
+    private func typeLive(_ text: String, into view: ProseView) {
+        for character in text { type(String(character), into: view) }
+    }
+
+    func testTypingStarItalicLeavesTrailingSpacePlainInMacView() {
+        let view = emptyParaMacView()
+
+        typeLive("*Italic* ", into: view)
+
+        let runs = view.document.root.content[0].content
+        XCTAssertEqual(runs.map(\.text), ["Italic", " "])
+        XCTAssertEqual(runs.map(\.marks), [[.italic], []])
+    }
+
+    func testTypingBoldInMacView() {
+        let view = emptyParaMacView()
+        typeLive("**Bold**", into: view)
+        let runs = view.document.root.content[0].content
+        XCTAssertEqual(runs.map(\.text), ["Bold"])
+        XCTAssertEqual(runs.map(\.marks), [[.bold]])
+    }
+
+    func testTypingCodePreservesPrecedingCharInMacView() {
+        let view = emptyParaMacView()
+        typeLive("a`Code`", into: view)
+        let runs = view.document.root.content[0].content
+        XCTAssertEqual(runs.map(\.text), ["a", "Code"])
+        XCTAssertEqual(runs.map(\.marks), [[], [.code]])
+    }
 }
 #endif

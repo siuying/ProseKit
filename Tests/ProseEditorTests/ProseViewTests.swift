@@ -558,6 +558,45 @@ extension ProseViewTests {
 
         XCTAssertEqual(view.document.root.content[0].type, "blockquote")
     }
+
+    // MARK: - Live inline mark rules (Phase 3)
+
+    private func emptyParaIOSView() -> ProseView {
+        let view = makeView(Document(.doc([.paragraph([])])))
+        let start = view.core.document.endTextPosition
+        view.selectedTextRange = ProseTextRange(anchor: start, head: start)
+        return view
+    }
+
+    private func typeLive(_ text: String, into view: ProseView) {
+        for character in text { view.insertText(String(character)) }
+    }
+
+    func testTypingStarItalicLeavesTrailingSpacePlainInIOSView() {
+        let view = emptyParaIOSView()
+
+        typeLive("*Italic* ", into: view)
+
+        let runs = view.document.root.content[0].content
+        XCTAssertEqual(runs.map(\.text), ["Italic", " "])
+        XCTAssertEqual(runs.map(\.marks), [[.italic], []])
+    }
+
+    func testTypingBoldInIOSView() {
+        let view = emptyParaIOSView()
+        typeLive("**Bold**", into: view)
+        let runs = view.document.root.content[0].content
+        XCTAssertEqual(runs.map(\.text), ["Bold"])
+        XCTAssertEqual(runs.map(\.marks), [[.bold]])
+    }
+
+    func testTypingCodePreservesPrecedingCharInIOSView() {
+        let view = emptyParaIOSView()
+        typeLive("a`Code`", into: view)
+        let runs = view.document.root.content[0].content
+        XCTAssertEqual(runs.map(\.text), ["a", "Code"])
+        XCTAssertEqual(runs.map(\.marks), [[], [.code]])
+    }
 }
 
 private final class InputDelegateSpy: NSObject, UITextInputDelegate {
