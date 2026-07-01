@@ -13,6 +13,24 @@ final class ProseViewTests: XCTestCase {
         return view
     }
 
+    func testRemoteTransactionRefreshesCanvasAndContentSize() {
+        let view = makeView(Document(.doc([.paragraph([.text("hi")])])))
+
+        let head = view.core.document.endTextPosition
+        view.core.applyRemote(Transaction(
+            steps: [ReplaceStep(from: head, to: head, insertText: " there")],
+            selection: TextSelection(anchor: head + 6, head: head + 6),
+            origin: .remote
+        ))
+
+        XCTAssertEqual(view.core.document.plainText, "hi there")
+        XCTAssertEqual(
+            view.canvas.layoutBox, view.core.layoutBox,
+            "a remote-Origin Transaction refreshes the Canvas without a local edit"
+        )
+        XCTAssertEqual(view.contentSize, view.core.layoutBox?.frame.size ?? .zero)
+    }
+
     func testSelectionRectsCoverEachLineFragmentWithStartAndEndFlags() throws {
         // Narrow width forces the paragraph to wrap into multiple Line Fragments.
         let view = makeView(

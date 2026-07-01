@@ -58,6 +58,11 @@ public final class YBinding: CollaborativeUndoController {
     /// synchronously inside that write, so this guard breaks the loop.
     private var isApplyingLocalWrite = false
 
+    /// The didApplyTransaction consumer that was installed before this binding
+    /// (the view shell's display refresh); called after the binding's own
+    /// handling and restored on detach().
+    private var chainedDidApplyTransaction: ((AppliedTransaction) -> Void)?
+
     /// Gates the encoder/decoder until the provider's first sync completes.
     private var hasJoined = false
 
@@ -75,8 +80,15 @@ public final class YBinding: CollaborativeUndoController {
         }
         self.fragment = fragment
 
+        // Chain, don't replace: the view shell installs a didApplyTransaction
+        // of its own (display refresh on remote-Origin Transactions) before a
+        // binding attaches. The binding encodes first, then the prior consumer
+        // runs; detach() restores it.
+        let chainedDidApplyTransaction = core.didApplyTransaction
+        self.chainedDidApplyTransaction = chainedDidApplyTransaction
         core.didApplyTransaction = { [weak self] applied in
             self?.handleLocalTransaction(applied)
+            chainedDidApplyTransaction?(applied)
         }
         fragmentObservation = try? fragment.observe { event in
             guard case .shared = event else { return }
@@ -129,7 +141,8 @@ public final class YBinding: CollaborativeUndoController {
         syncTask = nil
         fragmentObservation = nil
         blockObservations = []
-        core.didApplyTransaction = nil
+        core.didApplyTransaction = chainedDidApplyTransaction
+        chainedDidApplyTransaction = nil
         core.isUndoSuppressed = false
         if core.collaborativeUndoController === self {
             core.collaborativeUndoController = nil

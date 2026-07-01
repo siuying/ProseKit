@@ -23,7 +23,9 @@ import UIKit
     /// `UIPasteboard.general` is unavailable to unhosted test bundles.
     public var pasteboard: Pasteboard = UIPasteboard.general
 
-    let core: EditorCore
+    /// The view's editor core, exposed so hosts can attach collaboration
+    /// (e.g. a `YBinding`) to a view-owned core — mirrors `MacProseView`.
+    public let core: EditorCore
     var state: EditorState { core.state }
     var layoutStore: IncrementalLayoutStore { core.layoutStore }
     var layoutBox: LayoutBox? { core.layoutBox }
@@ -67,6 +69,27 @@ import UIKit
             name: UIResponder.keyboardWillChangeFrameNotification,
             object: nil
         )
+        // Local edits repaint through performEdit; remote-Origin Transactions
+        // (a collaboration binding reconciling the Shared Replica) arrive
+        // outside any edit bracket, so the display refreshes here. A binding
+        // that installs its own didApplyTransaction must chain this one.
+        core.didApplyTransaction = { [weak self] applied in
+            guard applied.origin == .remote else { return }
+            self?.remoteTransactionApplied()
+        }
+    }
+
+    /// Refreshes the display after a remote-origin Transaction. The core has
+    /// already relaid out; mirror the result into the Canvas and content
+    /// size. Never scrolls — only local edits reveal the caret.
+    private func remoteTransactionApplied() {
+        inputDelegate?.textWillChange(self)
+        canvas.layoutBox = layoutBox
+        contentSize = layoutBox?.frame.size ?? .zero
+        canvas.setNeedsDisplay()
+        setNeedsLayout()
+        inputDelegate?.textDidChange(self)
+        onStateChange?()
     }
 
     @available(*, unavailable)

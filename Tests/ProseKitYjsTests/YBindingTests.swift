@@ -283,6 +283,38 @@ final class YBindingTests: XCTestCase {
         withExtendedLifetime((bindingA, bindingB)) {}
     }
 
+    // MARK: - didApplyTransaction chaining
+
+    /// The view shell installs a didApplyTransaction (display refresh on
+    /// remote-Origin Transactions) before a binding attaches; the binding
+    /// must chain it, not replace it, and detach() must hand it back.
+    func testBindingChainsAndRestoresPriorDidApplyConsumer() async throws {
+        let core = makeCore("")
+        var origins: [Origin] = []
+        core.didApplyTransaction = { origins.append($0.origin) }
+
+        let doc = YDoc()
+        let binding = YBinding(core: core, doc: doc)
+        try seedReplica(doc, "hello")
+        binding.join()
+        await waitForDocumentText("hello", in: core)
+
+        XCTAssertEqual(core.document.plainText, "hello")
+        XCTAssertTrue(
+            origins.contains(.remote),
+            "the prior consumer still observes the binding's remote applies"
+        )
+
+        origins.removeAll()
+        try core.insertText("!")
+        XCTAssertEqual(origins, [.local], "local edits reach the prior consumer through the chain")
+
+        binding.detach()
+        origins.removeAll()
+        try core.insertText("?")
+        XCTAssertEqual(origins, [.local], "detach restores the prior consumer")
+    }
+
     // MARK: - Fragment name
 
     func testMismatchedFragmentNamesDoNotConverge() throws {

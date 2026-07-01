@@ -42,6 +42,15 @@ import SwiftUI
         setAccessibilityRole(.textArea)
         setAccessibilityLabel("Prose editor")
         setAccessibilityValue(document.plainText)
+        // Local edits repaint through their own relayout calls; remote-Origin
+        // Transactions (a collaboration binding reconciling the Shared
+        // Replica) arrive outside them, so the display refreshes here. A
+        // binding that installs its own didApplyTransaction must chain this
+        // one. Never scrolls — only local edits reveal the caret.
+        core.didApplyTransaction = { [weak self] applied in
+            guard applied.origin == .remote else { return }
+            self?.relayout()
+        }
     }
 
     @available(*, unavailable)

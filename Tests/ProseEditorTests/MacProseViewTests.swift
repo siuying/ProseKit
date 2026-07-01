@@ -647,6 +647,25 @@ extension MacProseViewTests {
         XCTAssertEqual(view.document.root.content[0].type, "heading")
     }
 
+    func testRemoteTransactionRefreshesCanvasDisplay() {
+        let view = ProseView(document: Document(.doc([.paragraph([.text("hi")])])))
+        view.frame = CGRect(x: 0, y: 0, width: 320, height: 120)
+        view.layoutSubtreeIfNeeded()
+
+        let head = view.core.document.endTextPosition
+        view.core.applyRemote(Transaction(
+            steps: [ReplaceStep(from: head, to: head, insertText: " there")],
+            selection: TextSelection(anchor: head + 6, head: head + 6),
+            origin: .remote
+        ))
+
+        XCTAssertEqual(view.core.document.plainText, "hi there")
+        XCTAssertEqual(
+            view.canvasView.layoutBox, view.core.layoutBox,
+            "a remote-Origin Transaction refreshes the Canvas without a local edit"
+        )
+    }
+
     func testPasteDoesNotTriggerInputRuleInMacView() {
         let view = emptyParaMacView()
         let pasteboard = NSPasteboard.withUniqueName()
