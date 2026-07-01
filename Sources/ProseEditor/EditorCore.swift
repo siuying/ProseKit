@@ -118,18 +118,24 @@ public enum EditorEditAction {
         }
     }
 
+    /// Inserts committed text and runs the StarterKit Input Rules (when
+    /// enabled). Use the `applyingInputRules:` overload for input that must not
+    /// trigger shortcuts — IME/marked text mid-composition and paste.
     public func insertText(_ text: String) throws {
+        try insertText(text, applyingInputRules: inputRulesEnabled)
+    }
+
+    public func insertText(_ text: String, applyingInputRules: Bool) throws {
         try runAndNotifyIfTransactionApplied {
-            // Gate on the pre-insert caret: `state.insertText` always collapses
-            // the selection to the insertion end, so checking afterward would
-            // also fire rules when a non-collapsed selection was replaced.
-            let wasCollapsed = state.selection.isCollapsed
             try state.insertText(text)
-            // Run markdown shortcuts on the just-typed text. Only for non-empty
-            // text typed at a collapsed caret; the rule's own Transaction becomes
-            // `lastTransaction`, so the follow-up relayout covers the converted
-            // block.
-            if inputRulesEnabled, wasCollapsed, !text.isEmpty {
+            // Run markdown shortcuts on the resulting text. Like ProseMirror,
+            // rules evaluate on the text before the caret after insertion,
+            // regardless of whether a selection was replaced — so autocomplete /
+            // replacement-range input can also complete a shortcut. The caret is
+            // always collapsed after `insertText`; the guard documents intent.
+            // The rule's own Transaction becomes `lastTransaction`, so the
+            // follow-up relayout covers the converted block.
+            if applyingInputRules, !text.isEmpty, state.selection.isCollapsed {
                 try InputRules.apply(InputRules.starterKit, to: &state)
             }
         }

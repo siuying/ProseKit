@@ -625,5 +625,39 @@ extension MacProseViewTests {
         XCTAssertEqual(view.document.root.content[0].plainText, "*Italic*")
         XCTAssertEqual(view.document.root.content[0].content.map(\.marks), [[]])
     }
+
+    // MARK: - Composition / replacement / paste boundaries (Phase 5)
+
+    func testMarkedTextDoesNotTriggerRuleMidCompositionInMacView() {
+        let view = emptyParaMacView()
+        let start = view.core.document.endTextPosition
+        view.core.setSelection(TextSelection(anchor: start, head: start))
+
+        // Provisional composition: the shortcut must not fire until committed.
+        view.setMarkedText("# ", selectedRange: NSRange(location: 2, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+        XCTAssertEqual(view.document.root.content[0].type, "paragraph")
+        XCTAssertEqual(view.document.root.content[0].plainText, "# ")
+    }
+
+    func testReplacementRangeTriggersRuleAfterReplacementInMacView() {
+        let view = makeMacView(Document(.doc([.paragraph([.text("#x")])])))
+        // Replacement ranges are character offsets: replace the "x" (offset 1)
+        // with a space, completing "# " — the rule must fire on the result.
+        view.insertText(" ", replacementRange: NSRange(location: 1, length: 1))
+        XCTAssertEqual(view.document.root.content[0].type, "heading")
+    }
+
+    func testPasteDoesNotTriggerInputRuleInMacView() {
+        let view = emptyParaMacView()
+        let pasteboard = NSPasteboard.withUniqueName()
+        pasteboard.clearContents()
+        pasteboard.setString("# ", forType: .string)
+        view.pasteboard = pasteboard
+
+        view.paste(nil)
+
+        XCTAssertEqual(view.document.root.content[0].type, "paragraph")
+        XCTAssertEqual(view.document.root.content[0].plainText, "# ")
+    }
 }
 #endif

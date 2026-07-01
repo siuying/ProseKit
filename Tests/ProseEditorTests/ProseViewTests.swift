@@ -621,6 +621,29 @@ extension ProseViewTests {
         XCTAssertEqual(view.document.root.content[0].plainText, "*Italic*")
         XCTAssertEqual(view.document.root.content[0].content.map(\.marks), [[]])
     }
+
+    // MARK: - Composition / paste boundaries (Phase 5)
+
+    func testPasteDoesNotTriggerInputRuleInIOSView() {
+        let view = emptyParaIOSView()
+        let pasteboard = UIPasteboard.withUniqueName()
+        view.pasteboard = pasteboard
+        pasteboard.string = "# "
+
+        view.paste(nil)
+
+        XCTAssertEqual(view.document.root.content[0].type, "paragraph")
+        XCTAssertEqual(view.document.root.content[0].plainText, "# ")
+    }
+
+    func testMarkedTextDoesNotTriggerRuleMidCompositionInIOSView() {
+        let view = emptyParaIOSView()
+        // Provisional IME composition: the shortcut must not fire until committed.
+        view.setMarkedText("# ", selectedRange: NSRange(location: 2, length: 0))
+
+        XCTAssertEqual(view.document.root.content[0].type, "paragraph")
+        XCTAssertEqual(view.document.root.content[0].plainText, "# ")
+    }
 }
 
 private final class InputDelegateSpy: NSObject, UITextInputDelegate {

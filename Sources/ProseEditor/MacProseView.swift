@@ -151,9 +151,11 @@ import SwiftUI
         relayout()
     }
 
+    /// Paste is a sibling system to typing-time Input Rules: pasted Markdown is
+    /// inserted verbatim, never run through the shortcuts.
     @objc public func paste(_ sender: Any?) {
         guard let text = pasteboard.string else { return }
-        insertTextFromInput(text, replacementRange: NSRange(location: NSNotFound, length: 0))
+        insertTextFromInput(text, replacementRange: NSRange(location: NSNotFound, length: 0), applyInputRules: false)
     }
 
     @objc public func undo(_ sender: Any?) {
@@ -416,7 +418,7 @@ import SwiftUI
         }
     }
 
-    private func insertTextFromInput(_ text: String, replacementRange: NSRange) {
+    private func insertTextFromInput(_ text: String, replacementRange: NSRange, applyInputRules: Bool = true) {
         let hadMarkedText = hasMarkedText()
         selectReplacementRange(replacementRange)
         let segments = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
@@ -426,7 +428,7 @@ import SwiftUI
             }
             if !segment.isEmpty || segments.count == 1 {
                 do {
-                    try core.insertText(segment)
+                    try core.insertText(segment, applyingInputRules: applyInputRules)
                 } catch is StepError {
                     // Unsupported edit: leave the document untouched.
                 } catch {
@@ -517,7 +519,9 @@ extension ProseView: @preconcurrency NSTextInputClient {
             selectReplacementRange(replacementRange)
         }
         let lower = min(core.selection.anchor, core.selection.head)
-        insertTextFromInput(text, replacementRange: NSRange(location: NSNotFound, length: 0))
+        // Marked text is provisional IME composition: never run shortcuts until
+        // the text is committed (which arrives via insertText, not setMarkedText).
+        insertTextFromInput(text, replacementRange: NSRange(location: NSNotFound, length: 0), applyInputRules: false)
         markedTextPositionRange = lower..<(lower + text.count)
         let selectedStart = core.clamp(lower + selectedRange.location)
         let selectedEnd = core.clamp(selectedStart + selectedRange.length)
