@@ -15,11 +15,20 @@
 //   decode <inFile>           Apply a v1 update produced by the Swift peer and
 //                             print the plain text y-prosemirror decodes from
 //                             the "prosemirror" fragment. (Swift -> JS)
+//   encodeJSON <json> <out>   Like `encode` but for a full ProseMirror doc JSON
+//                             (marks/blocks/nesting). (JS -> Swift)
+//   decodeJSON <inFile>       Like `decode` but prints the full doc JSON the JS
+//                             peer sees (so Swift can assert marks/attrs). (Swift -> JS)
+//   mutateJSON <base> <new> <out>
+//                             Reconcile the replica from <base> to doc <new> via
+//                             y-prosemirror's in-place `updateYFragment`, so a
+//                             structural edit merges with a peer's concurrent
+//                             edit. Emits the merged v1 update. (JS structural op)
 
 import { readFileSync, writeFileSync } from "node:fs";
 import * as Y from "yjs";
 import { Schema } from "prosemirror-model";
-import { prosemirrorToYDoc, yDocToProsemirrorJSON } from "y-prosemirror";
+import { prosemirrorToYDoc, yDocToProsemirrorJSON, updateYFragment } from "y-prosemirror";
 
 const FRAGMENT = "prosemirror";
 
@@ -37,12 +46,20 @@ const schema = new Schema({
       attrs: { level: { default: 1 }, textAlign: { default: null } },
       toDOM: (node) => [`h${node.attrs.level}`, 0],
     },
+    blockquote: { group: "block", content: "block+", toDOM: () => ["blockquote", 0] },
+    // A code block: a node type ProseKit's Schema does not know, so it converges
+    // via the opaque path (#70) — ProseKit must preserve it byte-faithfully.
+    codeBlock: { group: "block", content: "text*", marks: "", code: true, toDOM: () => ["pre", ["code", 0]] },
     // An atom node ProseKit's Schema does not know — used to prove opaque
     // round-trip (#70): ProseKit must preserve it byte-faithfully.
     image: { group: "block", atom: true, attrs: { src: {} }, toDOM: (node) => ["img", { src: node.attrs.src }] },
+    // `listItem`/`taskItem` allow a trailing nested list so nesting fixtures
+    // (a list inside a list item) parse on the JS peer exactly as ProseKit nests.
     bulletList: { group: "block", content: "listItem+", toDOM: () => ["ul", 0] },
     orderedList: { group: "block", content: "listItem+", attrs: { start: { default: 1 } }, toDOM: () => ["ol", 0] },
-    listItem: { content: "paragraph+", toDOM: () => ["li", 0] },
+    listItem: { content: "paragraph block*", toDOM: () => ["li", 0] },
+    taskList: { group: "block", content: "taskItem+", toDOM: () => ["ul", 0] },
+    taskItem: { content: "paragraph block*", attrs: { checked: { default: false } }, toDOM: () => ["li", 0] },
     text: {},
   },
   marks: {
@@ -60,6 +77,12 @@ const schema = new Schema({
     highlight: {
       attrs: { color: {} },
       toDOM: (mark) => ["mark", { "data-color": mark.attrs.color }, 0],
+    },
+    // A mark key only the JS peer understands — proves opaque *mark* round-trip
+    // (#70): ProseKit carries it through an edit-and-sync cycle without loss.
+    comment: {
+      attrs: { id: {} },
+      toDOM: (mark) => ["span", { "data-comment": mark.attrs.id }, 0],
     },
   },
 });
@@ -97,6 +120,22 @@ if (mode === "fragment") {
   const [jsonFile, outFile] = rest;
   const docJSON = JSON.parse(readFileSync(jsonFile, "utf8"));
   const ydoc = prosemirrorToYDoc(schema.nodeFromJSON(docJSON), FRAGMENT);
+  writeFileSync(outFile, Buffer.from(Y.encodeStateAsUpdate(ydoc)));
+} else if (mode === "mutateJSON") {
+  // Reconcile the shared replica from <baseFile> to the full ProseMirror doc in
+  // <newDocFile> using y-prosemirror's *real* in-place reconciler
+  // (`updateYFragment`) — the same code path the browser binding runs on every
+  // transaction. Structural edits (reorder, nest) land as minimal CRDT ops that
+  // merge with a peer's concurrent edit into untouched siblings, rather than a
+  // wholesale delete+reinsert that would clobber it. Emits the merged v1 update.
+  const [baseFile, newDocFile, outFile] = rest;
+  const ydoc = new Y.Doc();
+  Y.applyUpdate(ydoc, new Uint8Array(readFileSync(baseFile)));
+  const yFragment = ydoc.getXmlFragment(FRAGMENT);
+  const newDoc = schema.nodeFromJSON(JSON.parse(readFileSync(newDocFile, "utf8")));
+  ydoc.transact(() => {
+    updateYFragment(ydoc, yFragment, newDoc, { mapping: new Map() });
+  });
   writeFileSync(outFile, Buffer.from(Y.encodeStateAsUpdate(ydoc)));
 } else if (mode === "decodeJSON") {
   // Apply a Swift-produced update and print the full ProseMirror doc JSON

@@ -322,7 +322,381 @@ final class YBindingInteropTests: XCTestCase {
         withExtendedLifetime(binding) {}
     }
 
+    // MARK: - Marks matrix (full wire-format contract, both directions)
+
+    /// Every mark ProseKit's Schema authors, in one paragraph, decoded by the real
+    /// JS peer — proves the whole `marksToAttributes` contract (plain names + attr
+    /// marks), not just bold/link.
+    func testMarksMatrixRealYProsemirrorDecodesProseKit() throws {
+        let fixture = try requireFixture()
+        let core = EditorCore(document: Document(.doc([.paragraph([
+            .text("b", marks: [.bold]),
+            .text("i", marks: [.italic]),
+            .text("s", marks: [.strike]),
+            .text("c", marks: [.code]),
+            .text("u", marks: [.underline]),
+            .text("p", marks: [.superscript]),
+            .text("q", marks: [.`subscript`]),
+            .text("h", marks: [.highlight(color: "yellow")]),
+            .text("l", marks: [.link(href: "https://example.com")]),
+        ])])))
+        let doc = YDoc()
+        let binding = YBinding(core: core, doc: doc)
+        binding.join()
+
+        let file = makeTempFile()
+        try doc.encodeStateAsUpdateV1().data.write(to: file)
+
+        let marks = Self.allMarksByText(try fixture.run("decodeJSON", file.path))
+        XCTAssertEqual(marks["b"], ["bold"])
+        XCTAssertEqual(marks["i"], ["italic"])
+        XCTAssertEqual(marks["s"], ["strike"])
+        XCTAssertEqual(marks["c"], ["code"])
+        XCTAssertEqual(marks["u"], ["underline"])
+        XCTAssertEqual(marks["p"], ["superscript"])
+        XCTAssertEqual(marks["q"], ["subscript"])
+        XCTAssertEqual(marks["h"], ["highlight(color=yellow)"])
+        XCTAssertEqual(marks["l"], ["link(href=https://example.com)"])
+        withExtendedLifetime(binding) {}
+    }
+
+    /// The same matrix authored by the JS peer and decoded by ProseKit — every
+    /// mark key round-trips to the exact ProseKit `Mark` value.
+    func testProseKitDecodesMarksMatrixFromRealYProsemirror() throws {
+        let fixture = try requireFixture()
+        let json = #"""
+        {"type":"doc","content":[{"type":"paragraph","content":[
+        {"type":"text","text":"b","marks":[{"type":"bold"}]},
+        {"type":"text","text":"i","marks":[{"type":"italic"}]},
+        {"type":"text","text":"s","marks":[{"type":"strike"}]},
+        {"type":"text","text":"c","marks":[{"type":"code"}]},
+        {"type":"text","text":"u","marks":[{"type":"underline"}]},
+        {"type":"text","text":"p","marks":[{"type":"superscript"}]},
+        {"type":"text","text":"q","marks":[{"type":"subscript"}]},
+        {"type":"text","text":"h","marks":[{"type":"highlight","attrs":{"color":"yellow"}}]},
+        {"type":"text","text":"l","marks":[{"type":"link","attrs":{"href":"https://example.com"}}]}
+        ]}]}
+        """#
+        let core = try decodeIntoProseKit(json, using: fixture).core
+
+        let block = try XCTUnwrap(core.document.root.content.first)
+        let runs = MarkedText(textblock: block).runs
+        XCTAssertEqual(runs.map(\.text), ["b", "i", "s", "c", "u", "p", "q", "h", "l"])
+        XCTAssertEqual(runs.map { $0.marks.map(\.type) }, [
+            ["bold"], ["italic"], ["strike"], ["code"], ["underline"],
+            ["superscript"], ["subscript"], ["highlight"], ["link"],
+        ])
+        XCTAssertEqual(runs[7].marks, [.highlight(color: "yellow")])
+        XCTAssertEqual(runs[8].marks, [.link(href: "https://example.com")])
+    }
+
+    // MARK: - Block types & attrs (blockquote, textAlign, opaque codeBlock)
+
+    func testBlockquoteConvergesBothDirections() throws {
+        let fixture = try requireFixture()
+        let document = Document(.doc([
+            .blockquote([.paragraph([.text("quoted")])]),
+            .paragraph([.text("after")]),
+        ]))
+
+        // ProseKit -> JS
+        let core = EditorCore(document: document)
+        let doc = YDoc()
+        let binding = YBinding(core: core, doc: doc)
+        binding.join()
+        let file = makeTempFile()
+        try doc.encodeStateAsUpdateV1().data.write(to: file)
+        let json = try fixture.run("decodeJSON", file.path)
+        XCTAssertTrue(json.contains("\"blockquote\""), json)
+        XCTAssertTrue(json.contains("\"quoted\""), json)
+
+        // JS -> ProseKit
+        let roundTrip = try decodeIntoProseKit(json, using: fixture).core
+        XCTAssertEqual(roundTrip.document.root.content, document.root.content)
+        withExtendedLifetime(binding) {}
+    }
+
+    func testTextAlignAttrConvergesBothDirections() throws {
+        let fixture = try requireFixture()
+        let document = Document(.doc([
+            Node(type: "paragraph", attrs: ["textAlign": .string("center")], content: [.text("centered")]),
+            Node(type: "heading", attrs: ["level": .int(2), "textAlign": .string("right")], content: [.text("titled")]),
+        ]))
+
+        // ProseKit -> JS: the JS peer reads the same alignment attrs off the elements.
+        let core = EditorCore(document: document)
+        let doc = YDoc()
+        let binding = YBinding(core: core, doc: doc)
+        binding.join()
+        let file = makeTempFile()
+        try doc.encodeStateAsUpdateV1().data.write(to: file)
+        let json = try fixture.run("decodeJSON", file.path)
+        XCTAssertTrue(json.contains("\"textAlign\":\"center\""), json)
+        XCTAssertTrue(json.contains("\"textAlign\":\"right\""), json)
+
+        // JS -> ProseKit: alignment attrs survive back to identical ProseKit Nodes.
+        let roundTrip = try decodeIntoProseKit(json, using: fixture).core
+        XCTAssertEqual(roundTrip.document.root.content, document.root.content)
+        withExtendedLifetime(binding) {}
+    }
+
+    /// `codeBlock` is not in ProseKit's Schema, so it converges via the opaque
+    /// path (#70): a JS-authored code block survives a ProseKit edit-and-sync
+    /// cycle byte-faithfully and the JS peer still reads its text back.
+    func testOpaqueCodeBlockSurvivesProseKitEditAndSync() throws {
+        let fixture = try requireFixture()
+        let json = #"""
+        {"type":"doc","content":[
+        {"type":"paragraph","content":[{"type":"text","text":"a"}]},
+        {"type":"codeBlock","content":[{"type":"text","text":"let x = 1"}]}
+        ]}
+        """#
+        let peer = try decodeIntoProseKit(json, using: fixture)
+        let core = peer.core
+        XCTAssertEqual(core.document.root.content.map(\.type), ["paragraph", "codeBlock"])
+
+        // Edit the neighbouring paragraph; the opaque code block must survive.
+        let start = (core.document.position(ofNodeAtPath: [0]) ?? 0) + 1
+        core.setSelection(TextSelection(anchor: start, head: start))
+        try core.insertText("Z")
+
+        let merged = makeTempFile()
+        try peer.doc.encodeStateAsUpdateV1().data.write(to: merged)
+        let decoded = try fixture.run("decodeJSON", merged.path)
+        XCTAssertTrue(decoded.contains("\"codeBlock\""), decoded)
+        XCTAssertTrue(decoded.contains("let x = 1"), decoded)
+        XCTAssertTrue(decoded.contains("\"Za\""), decoded)
+    }
+
+    // MARK: - Nesting & lists (ordered start, task checked, nesting, reorder)
+
+    func testOrderedListStartAttrConvergesBothDirections() throws {
+        let fixture = try requireFixture()
+        let document = Document(.doc([
+            .orderedList(start: 3, [
+                .listItem([.paragraph([.text("three")])]),
+                .listItem([.paragraph([.text("four")])]),
+            ]),
+        ]))
+
+        let core = EditorCore(document: document)
+        let doc = YDoc()
+        let binding = YBinding(core: core, doc: doc)
+        binding.join()
+        let file = makeTempFile()
+        try doc.encodeStateAsUpdateV1().data.write(to: file)
+        let json = try fixture.run("decodeJSON", file.path)
+        XCTAssertTrue(json.contains("\"orderedList\""), json)
+        XCTAssertTrue(json.contains("\"start\":3"), json)
+
+        let roundTrip = try decodeIntoProseKit(json, using: fixture).core
+        XCTAssertEqual(roundTrip.document.root.content, document.root.content)
+        withExtendedLifetime(binding) {}
+    }
+
+    func testTaskListCheckedConvergesBothDirections() throws {
+        let fixture = try requireFixture()
+        let document = Document(.doc([
+            .taskList([
+                .taskItem(checked: true, [.paragraph([.text("done")])]),
+                .taskItem(checked: false, [.paragraph([.text("todo")])]),
+            ]),
+        ]))
+
+        let core = EditorCore(document: document)
+        let doc = YDoc()
+        let binding = YBinding(core: core, doc: doc)
+        binding.join()
+        let file = makeTempFile()
+        try doc.encodeStateAsUpdateV1().data.write(to: file)
+        let json = try fixture.run("decodeJSON", file.path)
+        XCTAssertTrue(json.contains("\"taskList\""), json)
+        XCTAssertTrue(json.contains("\"checked\":true"), json)
+
+        let roundTrip = try decodeIntoProseKit(json, using: fixture).core
+        XCTAssertEqual(roundTrip.document.root.content, document.root.content)
+        withExtendedLifetime(binding) {}
+    }
+
+    func testNestedListConvergesBothDirections() throws {
+        let fixture = try requireFixture()
+        let document = Document(.doc([
+            .bulletList([
+                .listItem([
+                    .paragraph([.text("parent")]),
+                    .bulletList([
+                        .listItem([.paragraph([.text("child")])]),
+                    ]),
+                ]),
+            ]),
+        ]))
+
+        let core = EditorCore(document: document)
+        let doc = YDoc()
+        let binding = YBinding(core: core, doc: doc)
+        binding.join()
+        let file = makeTempFile()
+        try doc.encodeStateAsUpdateV1().data.write(to: file)
+        let json = try fixture.run("decodeJSON", file.path)
+        XCTAssertTrue(json.contains("\"parent\"") && json.contains("\"child\""), json)
+
+        let roundTrip = try decodeIntoProseKit(json, using: fixture).core
+        XCTAssertEqual(roundTrip.document.root.content, document.root.content)
+        withExtendedLifetime(binding) {}
+    }
+
+    /// Concurrent edits into *untouched siblings* converge across the wire: the
+    /// JS peer edits one list item's text while ProseKit concurrently edits a
+    /// different item, and the merge keeps both — the acceptance case for Phase 4
+    /// ("reordering and nesting changes preserve concurrent edits into untouched
+    /// siblings"). The JS peer reconciles in place via the real `updateYFragment`,
+    /// so its edit lands as minimal CRDT ops that merge with ProseKit's.
+    func testConcurrentEditsIntoUntouchedSiblingsConverge() async throws {
+        let fixture = try requireFixture()
+
+        // Shared base: [a, b, c]. Both peers start from these bytes.
+        let baseJSON = #"""
+        {"type":"doc","content":[{"type":"bulletList","content":[
+        {"type":"listItem","content":[{"type":"paragraph","content":[{"type":"text","text":"a"}]}]},
+        {"type":"listItem","content":[{"type":"paragraph","content":[{"type":"text","text":"b"}]}]},
+        {"type":"listItem","content":[{"type":"paragraph","content":[{"type":"text","text":"c"}]}]}
+        ]}]}
+        """#
+        let baseJSONFile = makeTempFile()
+        try Data(baseJSON.utf8).write(to: baseJSONFile)
+        let baseFile = makeTempFile()
+        try fixture.run("encodeJSON", baseJSONFile.path, baseFile.path)
+
+        // ProseKit joins the shared replica and appends "Z" to the first item.
+        let doc = YDoc()
+        try doc.apply(.v1(Data(contentsOf: baseFile)))
+        let core = EditorCore(document: Document(.doc([.paragraph([])])))
+        let binding = YBinding(core: core, doc: doc)
+        binding.join()
+        let afterA = (core.document.position(ofNodeAtPath: [0, 0, 0]) ?? 0) + 2 // after "a"
+        core.setSelection(TextSelection(anchor: afterA, head: afterA))
+        try core.insertText("Z")
+
+        // JS peer, from the same base, appends "Q" to the *third* item (a sibling
+        // ProseKit never touched).
+        let jsEditJSON = #"""
+        {"type":"doc","content":[{"type":"bulletList","content":[
+        {"type":"listItem","content":[{"type":"paragraph","content":[{"type":"text","text":"a"}]}]},
+        {"type":"listItem","content":[{"type":"paragraph","content":[{"type":"text","text":"b"}]}]},
+        {"type":"listItem","content":[{"type":"paragraph","content":[{"type":"text","text":"cQ"}]}]}
+        ]}]}
+        """#
+        let jsEditJSONFile = makeTempFile()
+        try Data(jsEditJSON.utf8).write(to: jsEditJSONFile)
+        let jsUpdate = makeTempFile()
+        try fixture.run("mutateJSON", baseFile.path, jsEditJSONFile.path, jsUpdate.path)
+
+        // Merge the JS peer's edit into ProseKit's replica. The fragment observer
+        // reconciles the merged replica back into `core` asynchronously, so yield
+        // until ProseKit has rendered it (as a provider's runloop would).
+        try doc.apply(.v1(Data(contentsOf: jsUpdate)))
+        let expected = ["aZ", "b", "cQ"]
+        for _ in 0..<50 where core.document.root.content.first?.content.map(\.plainText) != expected {
+            await Task.yield()
+        }
+
+        // Both peers converge to [aZ, b, cQ]: each peer's edit into its untouched
+        // sibling survived the merge.
+        let list = try XCTUnwrap(core.document.root.content.first)
+        XCTAssertEqual(list.content.map(\.plainText), expected)
+
+        let mergedFile = makeTempFile()
+        try doc.encodeStateAsUpdateV1().data.write(to: mergedFile)
+        let jsView = try fixture.run("decodeJSON", mergedFile.path)
+        for text in expected {
+            XCTAssertTrue(jsView.contains("\"\(text)\""), jsView)
+        }
+        withExtendedLifetime(binding) {}
+    }
+
+    // MARK: - Opaque round-trip: mark keys (#70)
+
+    /// A mark key only the JS peer understands (`comment`) survives a full
+    /// ProseKit edit-and-sync cycle: ProseKit carries it opaquely on the text run
+    /// and re-emits it, so the JS peer still reads the comment with its id.
+    func testUnknownMarkSurvivesProseKitEditAndSync() throws {
+        let fixture = try requireFixture()
+        let json = #"""
+        {"type":"doc","content":[{"type":"paragraph","content":[
+        {"type":"text","text":"flagged","marks":[{"type":"comment","attrs":{"id":"c1"}}]},
+        {"type":"text","text":" tail"}
+        ]}]}
+        """#
+        let peer = try decodeIntoProseKit(json, using: fixture)
+        let core = peer.core
+
+        // The comment mark is carried opaquely as a Mark whose type is the raw key.
+        let block = try XCTUnwrap(core.document.root.content.first)
+        let runs = MarkedText(textblock: block).runs
+        XCTAssertEqual(runs.first?.marks, [Mark(type: "comment", attrs: ["id": .string("c1")])])
+
+        // Edit the trailing (unmarked) run; the comment must survive re-encoding.
+        let end = (core.document.position(ofNodeAtPath: [0]) ?? 0) + 1 + core.document.plainText.count
+        core.setSelection(TextSelection(anchor: end, head: end))
+        try core.insertText("!")
+
+        let merged = makeTempFile()
+        try peer.doc.encodeStateAsUpdateV1().data.write(to: merged)
+        let decoded = try fixture.run("decodeJSON", merged.path)
+        XCTAssertTrue(decoded.contains("\"comment\""), decoded)
+        XCTAssertTrue(decoded.contains("\"c1\""), decoded)
+        XCTAssertTrue(decoded.contains("tail!"), decoded)
+    }
+
+    /// Maps each decoded text run to a sorted list of full mark descriptors —
+    /// `"bold"`, `"highlight(color=yellow)"`, `"link(href=…)"` — for asserting
+    /// the whole marks matrix (types *and* attrs) the JS peer sees.
+    private static func allMarksByText(_ json: String) -> [String: [String]] {
+        guard let data = json.data(using: .utf8),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let paragraph = (root["content"] as? [[String: Any]])?.first,
+              let inline = paragraph["content"] as? [[String: Any]] else { return [:] }
+        var result: [String: [String]] = [:]
+        for node in inline {
+            guard let text = node["text"] as? String else { continue }
+            let marks = (node["marks"] as? [[String: Any]] ?? []).map { mark -> String in
+                let type = mark["type"] as? String ?? "?"
+                let attrs = (mark["attrs"] as? [String: Any]) ?? [:]
+                guard !attrs.isEmpty else { return type }
+                let pairs = attrs.map { "\($0.key)=\($0.value)" }.sorted().joined(separator: ",")
+                return "\(type)(\(pairs))"
+            }
+            result[text] = marks.sorted()
+        }
+        return result
+    }
+
     // MARK: - Fixture harness
+
+    /// A ProseKit replica joined to a Y.Doc: the `binding` must stay retained for
+    /// local edits to keep propagating into `doc`, so callers hold the whole Peer.
+    private struct Peer {
+        let core: EditorCore
+        let doc: YDoc
+        let binding: YBinding
+    }
+
+    /// Encodes a full ProseMirror doc JSON with the real y-prosemirror peer, then
+    /// applies the resulting Yjs v1 update into a fresh ProseKit replica — the
+    /// canonical JS → ProseKit decode path shared by the matrix tests.
+    private func decodeIntoProseKit(_ json: String, using fixture: Fixture) throws -> Peer {
+        let jsonFile = makeTempFile()
+        try Data(json.utf8).write(to: jsonFile)
+        let updateFile = makeTempFile()
+        try fixture.run("encodeJSON", jsonFile.path, updateFile.path)
+
+        let doc = YDoc()
+        try doc.apply(.v1(Data(contentsOf: updateFile)))
+        let core = EditorCore(document: Document(.doc([.paragraph([])])))
+        let binding = YBinding(core: core, doc: doc)
+        binding.join()
+        return Peer(core: core, doc: doc, binding: binding)
+    }
 
     private func replicaText(_ doc: YDoc) throws -> String {
         let fragment = try doc.xmlFragment(named: YBinding.defaultFragmentName)
