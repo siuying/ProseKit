@@ -230,4 +230,76 @@ final class EditorCoreTests: XCTestCase {
         // even though the caret sits to the right of an italic run.
         XCTAssertFalse(core.state.isActive(.italic))
     }
+
+    // MARK: - Immediate Backspace revert (Phase 4)
+
+    func testBackspaceAfterBlockRuleRestoresLiteralMarkdown() throws {
+        let core = emptyParagraphCore()
+        try core.insertText("# ")
+        XCTAssertEqual(core.document.root.content[0].type, "heading")
+
+        XCTAssertTrue(core.undoInputRule())
+        XCTAssertEqual(core.document.root.content[0].type, "paragraph")
+        XCTAssertEqual(core.document.root.content[0].plainText, "# ")
+    }
+
+    func testBackspaceAfterInlineRuleRestoresLiteralMarkdown() throws {
+        let core = emptyParagraphCore()
+        try core.insertText("*Italic*")
+        XCTAssertEqual(runs(core).map(\.marks), [[.italic]])
+
+        XCTAssertTrue(core.undoInputRule())
+        XCTAssertEqual(core.document.root.content[0].plainText, "*Italic*")
+        XCTAssertEqual(runs(core).map(\.marks), [[]])
+    }
+
+    func testUndoInputRuleIsANoopAfterSelectionMove() throws {
+        let core = emptyParagraphCore()
+        try core.insertText("# ")
+        core.setSelection(TextSelection(anchor: 1, head: 1))   // move the caret
+
+        XCTAssertFalse(core.undoInputRule())
+        XCTAssertEqual(core.document.root.content[0].type, "heading")
+    }
+
+    func testUndoInputRuleIsANoopAfterFurtherTyping() throws {
+        let core = emptyParagraphCore()
+        try core.insertText("# ")
+        try core.insertText("x")   // an unrelated edit consumes the snapshot
+
+        XCTAssertFalse(core.undoInputRule())
+        XCTAssertEqual(core.document.root.content[0].type, "heading")
+        XCTAssertEqual(core.document.root.content[0].plainText, "x")
+    }
+
+    func testUndoAfterBlockRevertDoesNotReapplyStaleConversion() throws {
+        let core = emptyParagraphCore()
+        try core.insertText("# ")
+        XCTAssertTrue(core.undoInputRule())   // back to paragraph "# "
+
+        // The conversion's undo entry must be dropped along with its document
+        // change: Undo must never re-apply a stale heading inverse onto the
+        // already-restored paragraph. (The first insert into an empty paragraph
+        // is not itself recorded, so there is simply nothing left to undo.)
+        XCTAssertFalse(core.undo())
+        XCTAssertEqual(core.document.root.content[0].type, "paragraph")
+        XCTAssertEqual(core.document.root.content[0].plainText, "# ")
+    }
+
+    func testUndoAfterInlineRevertRevertsLiteralTypingAndKeepsPriorHistory() throws {
+        // A non-empty starting block so the literal insertion is recorded.
+        let core = EditorCore(document: Document(.doc([.paragraph([.text("hi ")])])))
+        let end = core.document.endTextPosition
+        core.setSelection(TextSelection(anchor: end, head: end))
+
+        try core.insertText("*x*")               // records the insert, then italicises
+        XCTAssertTrue(core.undoInputRule())      // back to literal "hi *x*"
+        XCTAssertEqual(core.document.root.content[0].plainText, "hi *x*")
+        XCTAssertEqual(core.document.root.content[0].content.map(\.marks), [[]])
+
+        // Prior history survives the revert: Undo removes the literal typing,
+        // not a corrupted/duplicated conversion.
+        XCTAssertTrue(core.undo())
+        XCTAssertEqual(core.document.root.content[0].plainText, "hi ")
+    }
 }

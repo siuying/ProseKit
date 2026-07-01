@@ -441,6 +441,12 @@ import SwiftUI
     }
 
     private func deleteBackwardFromInput() {
+        // Backspace immediately after a shortcut reverts it to the literal
+        // Markdown, ahead of any structural join or plain deletion.
+        if core.undoInputRule() {
+            relayout()
+            return
+        }
         do {
             if try core.dispatch(Commands.joinBackward())
                 || core.dispatch(Commands.liftOutOfContainer()) {

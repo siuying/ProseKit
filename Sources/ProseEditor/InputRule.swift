@@ -174,6 +174,18 @@ public struct InputRule: Sendable {
     }
 }
 
+/// The literal document/selection captured just before an Input Rule fired, so
+/// Backspace immediately after a shortcut can restore the typed Markdown. The
+/// ProseKit analogue of Tiptap's input-rule plugin undo state.
+public struct AppliedInputRule: Sendable {
+    public var beforeDocument: Document
+    public var beforeSelection: TextSelection
+    /// The undo history as it stood before the rule transform, so reverting also
+    /// drops the transform's own undo entry (otherwise a later Undo would apply
+    /// the conversion's stale inverse to the already-restored literal text).
+    var beforeHistory: EditorHistory
+}
+
 public enum InputRules {
     /// The StarterKit rules available today: block shortcuts first, then the
     /// inline mark shortcuts. List / codeBlock / task rules join as those node
@@ -271,7 +283,18 @@ public enum InputRules {
         let before = (try? state.document.text(from: blockTextStart, to: head)) ?? ""
         for rule in rules {
             if let match = rule.find(before) {
+                // Snapshot the literal pre-rule document so Backspace can revert
+                // the shortcut. Captured before the transform; recorded after,
+                // since the transform's own dispatch clears the slot.
+                let beforeDocument = state.document
+                let beforeSelection = state.selection
+                let beforeHistory = state.history
                 try rule.transform(&state, match, blockTextStart)
+                state.recordAppliedInputRule(
+                    beforeDocument: beforeDocument,
+                    beforeSelection: beforeSelection,
+                    beforeHistory: beforeHistory
+                )
                 return true
             }
         }

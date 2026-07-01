@@ -141,6 +141,19 @@ public enum EditorEditAction {
         }
     }
 
+    /// Reverts the most recent Input Rule to its literal Markdown if Backspace
+    /// is pressed immediately after a shortcut fired. The view shells call this
+    /// ahead of structural Backspace and plain deletion. Returns whether a rule
+    /// was reverted.
+    @discardableResult
+    public func undoInputRule() -> Bool {
+        var reverted = false
+        runAndNotifyIfTransactionApplied {
+            reverted = state.undoInputRule()
+        }
+        return reverted
+    }
+
     /// Applies a remote-origin Transaction without recording local history.
     public func applyRemote(_ transaction: Transaction) {
         do {
