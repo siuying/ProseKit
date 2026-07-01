@@ -34,6 +34,17 @@ public enum EditorEditAction {
     /// opaquely rather than reinterpreting them.
     public let schema: Schema
 
+    /// When true, text typed through `insertText` is run past the StarterKit
+    /// Input Rules (markdown shortcuts) after insertion. Defaults to enabled,
+    /// matching Tiptap.
+    ///
+    /// Composition/marked text DOES currently reach this seam (the shells route
+    /// `setMarkedText` through `insertText`); suppressing rules until input is
+    /// committed is owned by the composition slice (Phase 5). Rules only fire at
+    /// a caret that was collapsed before insertion — replacing a selection types
+    /// plain.
+    public var inputRulesEnabled = true
+
     public init(document: Document, schema: Schema = .slice1) {
         self.schema = schema
         self.state = EditorState(document: document)
@@ -109,7 +120,18 @@ public enum EditorEditAction {
 
     public func insertText(_ text: String) throws {
         try runAndNotifyIfTransactionApplied {
+            // Gate on the pre-insert caret: `state.insertText` always collapses
+            // the selection to the insertion end, so checking afterward would
+            // also fire rules when a non-collapsed selection was replaced.
+            let wasCollapsed = state.selection.isCollapsed
             try state.insertText(text)
+            // Run markdown shortcuts on the just-typed text. Only for non-empty
+            // text typed at a collapsed caret; the rule's own Transaction becomes
+            // `lastTransaction`, so the follow-up relayout covers the converted
+            // block.
+            if inputRulesEnabled, wasCollapsed, !text.isEmpty {
+                try InputRules.apply(InputRules.starterKit, to: &state)
+            }
         }
     }
 

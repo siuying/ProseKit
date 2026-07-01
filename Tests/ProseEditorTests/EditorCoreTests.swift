@@ -92,4 +92,63 @@ final class EditorCoreTests: XCTestCase {
         XCTAssertTrue(core.undo())
         XCTAssertEqual(core.document.plainText, "abc")
     }
+
+    // MARK: - Live block input rules (Phase 1)
+
+    func testTypingHashSpaceConvertsParagraphToHeadingLive() throws {
+        let core = EditorCore(document: Document(.doc([.paragraph([])])))
+        let start = core.document.endTextPosition
+        core.setSelection(TextSelection(anchor: start, head: start))
+
+        try core.insertText("# ")
+
+        XCTAssertEqual(core.document.root.content[0].type, "heading")
+        XCTAssertEqual(core.document.root.content[0].attrs["level"], .int(1))
+        XCTAssertEqual(core.document.root.content[0].plainText, "")
+    }
+
+    func testTypingGtSpaceWrapsParagraphInBlockquoteLive() throws {
+        let core = EditorCore(document: Document(.doc([.paragraph([])])))
+        let start = core.document.endTextPosition
+        core.setSelection(TextSelection(anchor: start, head: start))
+
+        try core.insertText("> ")
+
+        XCTAssertEqual(core.document.root.content[0].type, "blockquote")
+    }
+
+    func testInputRulesCanBeDisabled() throws {
+        let core = EditorCore(document: Document(.doc([.paragraph([])])))
+        core.inputRulesEnabled = false
+        let start = core.document.endTextPosition
+        core.setSelection(TextSelection(anchor: start, head: start))
+
+        try core.insertText("# ")
+
+        XCTAssertEqual(core.document.root.content[0].type, "paragraph")
+        XCTAssertEqual(core.document.root.content[0].plainText, "# ")
+    }
+
+    func testReplacingASelectionWithTriggerDoesNotFireRule() throws {
+        let core = EditorCore(document: Document(.doc([.paragraph([.text("abc")])])))
+        let start = try XCTUnwrap(core.document.position(ofTextInBlockAt: 0))
+        // Select the whole word, then "type" a trigger over it.
+        core.setSelection(TextSelection(anchor: start, head: start + 3))
+
+        try core.insertText("# ")
+
+        XCTAssertEqual(core.document.root.content[0].type, "paragraph")
+        XCTAssertEqual(core.document.root.content[0].plainText, "# ")
+    }
+
+    func testTypingHashSpaceNotAtBlockStartStaysPlain() throws {
+        let core = EditorCore(document: Document(.doc([.paragraph([.text("a")])])))
+        let end = core.document.endTextPosition
+        core.setSelection(TextSelection(anchor: end, head: end))
+
+        try core.insertText("# ")
+
+        XCTAssertEqual(core.document.root.content[0].type, "paragraph")
+        XCTAssertEqual(core.document.root.content[0].plainText, "a# ")
+    }
 }
