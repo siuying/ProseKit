@@ -93,6 +93,9 @@ final class ProseViewTests: XCTestCase {
 
     func testSettingSelectedTextRangeToCurrentSelectionIsANoop() throws {
         let view = makeView(Document(.doc([.paragraph([.text("hello world")])])))
+        // Establish a known current selection first, then re-apply the *same*
+        // range: only the redundant assignment should be observed as a no-op.
+        view.selectedTextRange = ProseTextRange(anchor: 2, head: 2)
         let spy = InputDelegateSpy()
         var stateChangeCount = 0
         view.inputDelegate = spy
@@ -532,7 +535,6 @@ final class ProseViewTests: XCTestCase {
     }
 }
 
-@MainActor
 @MainActor
 extension ProseViewTests {
     // MARK: - Live block input rules (Phase 1)

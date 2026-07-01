@@ -248,6 +248,10 @@ swift test
 # one below.
 xcodebuild test -scheme ProseKit-Package \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.1'
+
+# Or use the helper, which resolves the pinned device to a concrete udid so it
+# never targets a same-named simulator on a different iOS version:
+scripts/test-ios.sh
 ```
 
 > **Canonical simulator:** iPhone 17 Pro on **iOS 26.1**. Always pass `OS=` (or

@@ -34,6 +34,21 @@ public final class ProseTextRange: UITextRange {
     public var textSelection: TextSelection {
         TextSelection(anchor: anchor, head: head)
     }
+
+    // `UITextRange` is an `NSObject`, so `==` (and `XCTAssertEqual`) route through
+    // `isEqual(_:)`, which defaults to pointer identity. Two ranges over the same
+    // anchor/head are the same selection, so compare by value.
+    public override func isEqual(_ object: Any?) -> Bool {
+        guard let other = object as? ProseTextRange else { return false }
+        return anchor == other.anchor && head == other.head
+    }
+
+    public override var hash: Int {
+        var hasher = Hasher()
+        hasher.combine(anchor)
+        hasher.combine(head)
+        return hasher.finalize()
+    }
 }
 
 public final class ProseTextSelectionRect: UITextSelectionRect {

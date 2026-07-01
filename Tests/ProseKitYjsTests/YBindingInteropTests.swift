@@ -1,3 +1,8 @@
+// The interop harness spawns a Node subprocess (`Foundation.Process`), which is
+// only available on macOS. Gating the whole suite keeps the iOS-simulator test
+// target compiling (Process is unavailable there and the simulator sandbox
+// cannot launch external processes anyway).
+#if os(macOS)
 import XCTest
 import Foundation
 import ProseEditor
@@ -402,3 +407,4 @@ final class YBindingInteropTests: XCTestCase {
         return url
     }
 }
+#endif
