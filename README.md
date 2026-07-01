@@ -30,22 +30,25 @@ that the web editors do — so documents round-trip between platforms.
 
 ## Requirements
 
-- iOS 17+ / macOS 14+
+- iOS 17+ / iPadOS 17+ / macOS 14+
 - Swift 6.0+ (Xcode 16+)
 
 ## Installation
 
-ProseKit is distributed as a Swift Package with two products:
+ProseKit is distributed as a Swift Package with three products:
 
-- `ProseModel` — the pure document model (no UIKit dependency).
-- `ProseEditor` — the interactive editor view (`ProseView`), depends on
-  `ProseModel`.
+- `ProseModel` — the pure document model (no UIKit/AppKit dependency).
+- `ProseEditor` — the interactive editor view (`ProseView` on iOS/iPadOS,
+  `MacProseView` on macOS), depends on `ProseModel`.
+- `ProseKitYjs` — Yjs (SwiftYrs) persistence and sync binding, depends on
+  `ProseEditor`.
 
 ### Swift Package Manager (Xcode)
 
 In Xcode, choose **File ▸ Add Package Dependencies…**, enter the repository URL,
-and add the `ProseEditor` product (and `ProseModel` if you want the model on its
-own) to your target.
+and add the products you need (`ProseEditor` for the editor view, `ProseModel`
+if you only need the document model, `ProseKitYjs` for Yjs persistence) to your
+target.
 
 ### Swift Package Manager (`Package.swift`)
 
@@ -58,6 +61,7 @@ targets: [
         name: "YourApp",
         dependencies: [
             .product(name: "ProseEditor", package: "ProseKit"),
+            // .product(name: "ProseKitYjs", package: "ProseKit"),
         ]
     ),
 ]
@@ -67,9 +71,10 @@ targets: [
 
 ### Build a document and show it
 
-`ProseView` is a `UIScrollView` subclass that conforms to `UITextInput`, so it
-drops into any UIKit hierarchy and gets the system keyboard, selection handles,
-and edit menu for free.
+On iOS/iPadOS, `ProseView` is a `UIScrollView` subclass that conforms to
+`UITextInput`, so it drops into any UIKit hierarchy and gets the system
+keyboard, selection handles, and edit menu for free. On macOS, use
+`MacProseView` — an `NSView` subclass with equivalent functionality.
 
 ```swift
 import UIKit
@@ -182,28 +187,51 @@ let plain = document.plainText
 
 ```
 .
-├── Package.swift            # SwiftPM manifest: ProseModel + ProseEditor products
+├── Package.swift            # SwiftPM manifest: ProseModel, ProseEditor, ProseKitYjs
 ├── Sources/
-│   ├── ProseModel/          # Pure document model — no UIKit
-│   │   ├── Document.swift    #   immutable document tree + positions
-│   │   ├── Node.swift        #   block & inline nodes, factory helpers
-│   │   ├── Mark.swift        #   inline formatting marks
-│   │   ├── Step.swift        #   invertible, serializable edits
-│   │   ├── Transaction.swift #   atomic batches of steps
-│   │   ├── Mapping.swift     #   remap positions across steps
-│   │   ├── Selection.swift   #   text selection in positions
-│   │   └── Schema/           #   node/mark rules the document must satisfy
-│   └── ProseEditor/         # Interactive editor — CoreText + UIKit
-│       ├── ProseView.swift   #   the editor view (UIScrollView + UITextInput)
-│       ├── EditorState.swift #   active marks/blocks, command availability
-│       ├── Commands.swift    #   editing intents as composable commands
-│       ├── InputRule.swift   #   typing-time rewrites (Markdown shortcuts)
-│       ├── Layout.swift      #   CoreText layout box tree
-│       ├── CanvasView.swift  #   viewport-clipped painting
-│       └── Marks/            #   per-mark CoreText styling
+│   ├── ProseModel/          # Pure document model — no UIKit/AppKit
+│   │   ├── Document.swift              #   immutable document tree + positions
+│   │   ├── Node.swift                  #   block & inline nodes, factory helpers
+│   │   ├── NodeEditing.swift           #   structural editing helpers
+│   │   ├── Mark.swift                  #   inline formatting marks
+│   │   ├── Step.swift                  #   invertible, serializable edits
+│   │   ├── StructuralSteps.swift       #   block-level step implementations
+│   │   ├── Transaction.swift           #   atomic batches of steps
+│   │   ├── Mapping.swift               #   remap positions across steps
+│   │   ├── Selection.swift             #   text selection in positions
+│   │   ├── DocumentCharacterSpace.swift #  character-index ↔ position mapping
+│   │   ├── JSONValue.swift             #   generic JSON value for node attributes
+│   │   └── Schema/                     #   node/mark rules the document must satisfy
+│   ├── ProseEditor/         # Interactive editor — CoreText + UIKit/AppKit
+│   │   ├── ProseView.swift             #   iOS editor (UIScrollView + UITextInput)
+│   │   ├── MacProseView.swift          #   macOS editor (NSView)
+│   │   ├── EditorCore.swift            #   shared editing logic (platform-agnostic)
+│   │   ├── EditorState.swift           #   active marks/blocks, command availability
+│   │   ├── EditorHistory.swift         #   undo/redo stack
+│   │   ├── EditorKeyBinding.swift      #   keyboard shortcut dispatch
+│   │   ├── Commands.swift              #   editing intents as composable commands
+│   │   ├── InputRule.swift             #   typing-time rewrites (Markdown shortcuts)
+│   │   ├── Layout.swift                #   CoreText layout box tree
+│   │   ├── Geometry.swift              #   layout geometry helpers
+│   │   ├── CanvasView.swift            #   iOS viewport-clipped painting
+│   │   ├── MacCanvasView.swift         #   macOS viewport-clipped painting
+│   │   ├── BlockStyle.swift            #   per-block-type visual style
+│   │   ├── LinkDetection.swift         #   URL detection in plain text
+│   │   ├── Pasteboard.swift            #   copy/paste serialization
+│   │   ├── PlatformColor.swift         #   UIColor/NSColor abstraction
+│   │   ├── UIKitTextInput.swift        #   UITextInput protocol internals
+│   │   ├── ProseView+UITextInput.swift #   UITextInput conformance
+│   │   ├── MacSelectionLayerView.swift #   macOS selection highlight layer
+│   │   └── Marks/                      #   per-mark CoreText styling
+│   └── ProseKitYjs/         # Yjs persistence & sync (SwiftYrs)
+│       ├── ProseKitYjs.swift           #   public API / encode-decode entry points
+│       ├── YBinding.swift              #   live YDoc ↔ editor binding
+│       ├── MarkedText.swift            #   YXmlText segment model
+│       └── MarkAttributes.swift        #   mark ↔ Yjs attribute mapping
 ├── Tests/
 │   ├── ProseModelTests/
-│   └── ProseEditorTests/
+│   ├── ProseEditorTests/
+│   └── ProseKitYjsTests/
 ├── Example/                 # ProseExample — a SwiftUI catalog app of demos
 ├── CONTEXT.md               # domain language / architecture reference
 └── docs/                    # ADRs and research notes
