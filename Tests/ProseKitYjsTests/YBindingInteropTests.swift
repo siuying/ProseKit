@@ -23,6 +23,16 @@ import SwiftYrs
 /// absent (e.g. a network-restricted CI) the tests `XCTSkip` rather than fail.
 @MainActor
 final class YBindingInteropTests: XCTestCase {
+    /// The two peers only converge if they key the shared type on the *same* root
+    /// XML-fragment field name. A rename on either side would otherwise silently
+    /// produce two disjoint documents that never converge, so assert equality
+    /// explicitly and fail loudly on drift.
+    func testFragmentFieldNameMatchesTheRealYProsemirrorPeer() throws {
+        let fixture = try requireFixture()
+        let jsFragment = try fixture.run("fragment")
+        XCTAssertEqual(jsFragment, YBinding.defaultFragmentName)
+    }
+
     func testProseKitDecodesUpdateFromRealYProsemirrorPeer() throws {
         let fixture = try requireFixture()
         let text = "Hello from y-prosemirror"
