@@ -186,12 +186,32 @@ public struct AppliedInputRule: Sendable {
     var beforeHistory: EditorHistory
 }
 
+/// The built-in Input Rules and the headless engine that runs them.
+///
+/// Mapping to Tiptap concepts, for anyone porting more rules:
+/// - `InputRule.mark(delimiter:mark:)` is Tiptap's `markInputRule` — a suffix
+///   finder plus delimiter deletion and an `AddMarkStep`.
+/// - `InputRule.exactBlock(trigger:)` covers Tiptap's textblock conversion
+///   (`textblockTypeInputRule`, e.g. heading) and node wrapping
+///   (`wrappingInputRule`, e.g. blockquote/list); the transform chooses the
+///   Step (`SetBlockTypeStep`, `WrapInStep`, `WrapInListStep`).
+/// - The pre-rule snapshot in `apply` plus `EditorState.undoInputRule()` is
+///   Tiptap's immediate `undoInputRule()` (Backspace reverts the shortcut).
+///
+/// `starterKit` is assembled as ordered groups (block rules, then mark rules)
+/// so a future Extension type can contribute and append its own rules in order,
+/// the way Tiptap extensions do via `addInputRules()`.
 public enum InputRules {
     /// The StarterKit rules available today: block shortcuts first, then the
     /// inline mark shortcuts. List / codeBlock / task rules join as those node
     /// types land (slices 12, 14, 15).
     public static let starterKit: [InputRule] =
-        headingRules + [blockquoteRule] + bulletListRules + [orderedListRule] + markRules
+        blockRules + markRules
+
+    /// Block shortcuts (heading / blockquote / bullet / ordered), grouped so a
+    /// future Extension can append further block rules in order.
+    static let blockRules: [InputRule] =
+        headingRules + [blockquoteRule] + bulletListRules + [orderedListRule]
 
     /// Inline mark shortcuts. Bold (`**`/`__`) precede italic (`*`/`_`) so a
     /// double-delimiter run resolves to bold, not nested italic. Code rejects a

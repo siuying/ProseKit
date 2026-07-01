@@ -115,6 +115,33 @@ let block  = editor.activeBlockType        // "paragraph", "heading", …
 editor.onStateChange = { /* refresh the toolbar */ }
 ```
 
+### Markdown shortcuts (input rules)
+
+ProseKit ships Tiptap-style **input rules**: patterns watched at the caret that
+rewrite just-typed text into structure or formatting. They fire while typing in
+both shells and are on by default. Backspace immediately after a shortcut
+restores the literal Markdown you typed.
+
+| Type this | Get |
+| --- | --- |
+| `# ` … `###### ` | Heading levels 1–6 |
+| `> ` | Blockquote |
+| `- ` or `* ` | Bullet list |
+| `1. ` | Ordered list |
+| `*text*` or `_text_` | _Italic_ |
+| `**text**` or `__text__` | **Bold** |
+| `` `text` `` | `Code` |
+| `~~text~~` | ~~Strike~~ |
+
+Block shortcuts fire at the start of a block; inline shortcuts fire on the
+final delimiter pair before the caret. Typing after an inline shortcut is plain
+(the mark is not carried). Composition/IME and paste never run the shortcuts —
+pasted Markdown is inserted verbatim.
+
+```swift
+editor.inputRulesEnabled = false   // opt out of all markdown shortcuts
+```
+
 ### Interoperate with Tiptap / ProseMirror JSON
 
 `Document` is `Codable` and round-trips the same JSON that Tiptap and
