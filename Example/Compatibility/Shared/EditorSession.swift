@@ -85,9 +85,15 @@ final class EditorSession: ObservableObject {
 
         startBridging()
 
-        // The same awareness shape tiptap's CollaborationCursor publishes;
-        // without a `cursor` field web peers list us but draw no caret.
+        // The same awareness shape tiptap's CollaborationCursor publishes:
+        // user + cursor (anchor/head as y-prosemirror relative positions).
         publishPresence()
+        // Selection changes republish the cursor; edits (which also fire this)
+        // additionally re-resolve remote cursors against the moved text.
+        proseView.core.didChangeSelection = { [weak self] _ in
+            self?.publishPresence()
+            self?.refreshRemoteSelections()
+        }
         // Peers prune awareness states not renewed within ~30s (y-protocols
         // outdatedTimeout). The JS provider re-broadcasts on a timer; renew
         // presence ourselves.
@@ -110,6 +116,7 @@ final class EditorSession: ObservableObject {
             tasks.append(Task { [weak self] in
                 for await _ in changes {
                     self?.refreshParticipants()
+                    self?.refreshRemoteSelections()
                 }
             })
         }
@@ -174,9 +181,55 @@ final class EditorSession: ObservableObject {
     }
 
     private func publishPresence() {
-        try? editorAwareness.setLocalState(
-            ["user": ["name": localName, "color": localColor]]
-        )
+        var state: [String: Any] = ["user": ["name": localName, "color": localColor]]
+        if let cursor = cursorPayload() {
+            state["cursor"] = cursor
+        }
+        try? editorAwareness.setLocalState(state)
+    }
+
+    /// The local Selection as y-prosemirror's awareness cursor shape:
+    /// `{ anchor: <relative position JSON>, head: <relative position JSON> }`.
+    private func cursorPayload() -> [String: Any]? {
+        let selection = proseView.core.selection
+        guard let anchor = binding.relativePosition(for: selection.anchor),
+              let head = binding.relativePosition(for: selection.head),
+              let anchorJSON = try? JSONSerialization.jsonObject(with: anchor.json),
+              let headJSON = try? JSONSerialization.jsonObject(with: head.json)
+        else { return nil }
+        return ["anchor": anchorJSON, "head": headJSON]
+    }
+
+    /// Re-resolves every peer's published cursor against the current replica
+    /// and hands the result to the view's remote-selection chrome.
+    private func refreshRemoteSelections() {
+        let localID = editorAwareness.clientID
+        let states = (try? editorAwareness.states()) ?? []
+        proseView.remoteSelections = states.compactMap { entry -> RemoteSelection? in
+            guard entry.clientID != localID,
+                  let state = entry.state as? [String: Any],
+                  let user = state["user"] as? [String: Any],
+                  let name = user["name"] as? String,
+                  let cursor = state["cursor"] as? [String: Any],
+                  let anchor = position(fromCursorField: cursor["anchor"]),
+                  let head = position(fromCursorField: cursor["head"])
+            else { return nil }
+            return RemoteSelection(
+                id: entry.clientID,
+                name: name,
+                color: PlatformColor(hex: user["color"] as? String ?? "#888888"),
+                selection: TextSelection(anchor: anchor, head: head)
+            )
+        }
+    }
+
+    private func position(fromCursorField field: Any?) -> Position? {
+        guard let field,
+              JSONSerialization.isValidJSONObject(field),
+              let data = try? JSONSerialization.data(withJSONObject: field),
+              let relative = try? YRelativePosition(json: data)
+        else { return nil }
+        return binding.position(for: relative)
     }
 
     private func refreshParticipants() {
@@ -196,6 +249,20 @@ final class EditorSession: ObservableObject {
                 )
             }
             .sorted { $0.name < $1.name }
+    }
+}
+
+extension PlatformColor {
+    /// Parses the "#rrggbb" colors peers publish in their awareness user field.
+    convenience init(hex: String) {
+        var value: UInt64 = 0
+        Scanner(string: String(hex.dropFirst(hex.hasPrefix("#") ? 1 : 0))).scanHexInt64(&value)
+        self.init(
+            red: CGFloat((value >> 16) & 0xFF) / 255,
+            green: CGFloat((value >> 8) & 0xFF) / 255,
+            blue: CGFloat(value & 0xFF) / 255,
+            alpha: 1
+        )
     }
 }
 

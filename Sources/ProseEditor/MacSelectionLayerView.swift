@@ -12,6 +12,14 @@ import ProseModel
     var caretRect = CGRect.zero {
         didSet { needsDisplay = true }
     }
+    /// Remote collaborators' chrome; drawn regardless of first-responder
+    /// state (a peer's caret is visible even while this editor is idle).
+    var remoteChrome: [RemoteSelectionChrome] = [] {
+        didSet {
+            guard remoteChrome != oldValue else { return }
+            needsDisplay = true
+        }
+    }
     private var editorIsFirstResponder = false {
         didSet {
             restartBlinking()
@@ -48,6 +56,9 @@ import ProseModel
     }
 
     override func draw(_ dirtyRect: NSRect) {
+        for chrome in remoteChrome {
+            chrome.draw()
+        }
         guard drawsCaret else { return }
         PlatformColor.label.setFill()
         caretRect.fill()

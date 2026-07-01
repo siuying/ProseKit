@@ -33,6 +33,15 @@ import UIKit
     lazy var proseTokenizer = UITextInputStringTokenizer(textInput: self)
     /// The Canvas (ADR 0002); it owns all drawing — see CanvasView.
     let canvas = CanvasView()
+    /// Remote collaborators' selection chrome — editor-drawn; the system only
+    /// draws the local caret. Content-space, so it scrolls with the text.
+    let remoteSelectionLayer = RemoteSelectionLayerView()
+    /// Remote collaborators' selections, drawn as chrome above the Canvas
+    /// (caret + range highlight + name label per peer). Geometry recomputes
+    /// on every relayout, so entries stay pinned to their text as it moves.
+    public var remoteSelections: [RemoteSelection] = [] {
+        didSet { updateRemoteSelectionChrome() }
+    }
     /// The task-checkbox tap; kept so the gesture delegate can gate only this
     /// recognizer and never the scroll view's own pan/touch gestures, whose
     /// delegate is also `self` (a UIScrollView is its own gestures' delegate).
@@ -47,6 +56,8 @@ import UIKit
         canvas.isOpaque = false
         // Below the system selection chrome UITextInteraction installs.
         addSubview(canvas)
+        remoteSelectionLayer.frame = .zero
+        addSubview(remoteSelectionLayer)
         // The system owns all selection chrome: caret, handles, loupe,
         // double-tap word select, edit menu.
         let textInteraction = UITextInteraction(for: .editable)
@@ -87,6 +98,7 @@ import UIKit
         canvas.layoutBox = layoutBox
         contentSize = layoutBox?.frame.size ?? .zero
         canvas.setNeedsDisplay()
+        updateRemoteSelectionChrome()
         setNeedsLayout()
         inputDelegate?.textDidChange(self)
         onStateChange?()
@@ -245,6 +257,20 @@ import UIKit
         core.relayout(width: bounds.width, changedRange: changedRange)
         canvas.layoutBox = layoutBox
         contentSize = layoutBox?.frame.size ?? .zero
+        updateRemoteSelectionChrome()
+    }
+
+    private func updateRemoteSelectionChrome() {
+        // At least viewport-sized: a name label hanging off a caret in the
+        // last (or only) line would clip against a content-sized frame.
+        remoteSelectionLayer.frame = CGRect(
+            origin: .zero,
+            size: CGSize(
+                width: max(contentSize.width, bounds.width),
+                height: max(contentSize.height, bounds.height)
+            )
+        )
+        remoteSelectionLayer.remoteChrome = RemoteSelectionChrome.chrome(for: remoteSelections, core: core)
     }
 
     /// Relayouts for the last transaction and invalidates only the region

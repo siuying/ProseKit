@@ -572,6 +572,101 @@ public final class YBinding: CollaborativeUndoController {
         return parentPosition + parent.nodeSize - 1
     }
 
+    // MARK: - Cursor positions (Position ⇄ Y relative position)
+
+    /// The Y relative position anchoring `position`, in the encoding
+    /// y-prosemirror peers publish in awareness `cursor` fields. Only inline
+    /// (textblock) positions anchor — a TextSelection endpoint always is one.
+    ///
+    /// Matching y-prosemirror's `absolutePositionToRelativePosition`: a
+    /// position inside inline content anchors into the block's `YXmlText`
+    /// (association `.before`); a caret in a textblock with no text node yet
+    /// (a peer-authored empty paragraph) anchors to the element itself.
+    public func relativePosition(for position: Position) -> YRelativePosition? {
+        let document = core.document
+        guard let info = document.blockInfo(containing: position), info.node.isTextblock else { return nil }
+        let length = MarkedText(textblock: info.node).plainText.count
+        let offset = max(0, min(position - (info.start + 1), length))
+        return try? doc.write { transaction -> YRelativePosition? in
+            guard let element = try element(atPath: info.path, transaction: transaction) else { return nil }
+            if try transaction.childCount(of: element) > 0,
+               case let .text(textNode) = try transaction.child(at: 0, in: element) {
+                return try transaction.relativePosition(in: textNode, at: UInt32(offset), association: .before)
+            }
+            return try transaction.relativePosition(anchoredTo: element, association: .after)
+        } ?? nil
+    }
+
+    /// The Position a peer's relative position currently points at, or nil if
+    /// it does not resolve into this binding's fragment. The inverse of
+    /// y-prosemirror's `relativePositionToAbsolutePosition`: the resolved
+    /// node's place in the replica locates the same node in the `Document`,
+    /// and the offset lands inside it (clamped, in case a reconcile is still
+    /// in flight).
+    public func position(for relative: YRelativePosition) -> Position? {
+        let document = core.document
+        return (try? doc.read { transaction -> Position? in
+            let resolved = try transaction.resolve(relative)
+            switch resolved.node {
+            case let .xmlText(textNode):
+                guard let path = try elementPath(of: textNode, in: fragment, prefix: [], transaction: transaction),
+                      let start = document.position(ofNodeAtPath: path) else { return nil }
+                let length = MarkedText(textblock: document.node(atPath: path)).plainText.count
+                return start + 1 + min(Int(resolved.offset), length)
+            case let .xmlElement(element):
+                guard let path = try elementPath(of: element, in: fragment, prefix: [], transaction: transaction),
+                      let start = document.position(ofNodeAtPath: path) else { return nil }
+                let children = document.node(atPath: path).content
+                let before = children.prefix(min(Int(resolved.offset), children.count))
+                return start + 1 + before.reduce(0) { $0 + $1.nodeSize }
+            case let .xmlFragment(resolvedFragment):
+                guard resolvedFragment == fragment else { return nil }
+                let blocks = document.root.content
+                guard Int(resolved.offset) < blocks.count else { return document.endPosition }
+                return document.position(ofNodeAtPath: [Int(resolved.offset)])
+            default:
+                return nil
+            }
+        }) ?? nil
+    }
+
+    /// The element at a `Document` child-index path, or nil where the replica
+    /// disagrees with the path.
+    private func element(atPath path: [Int], transaction: YReadTransaction) throws -> YXmlElement? {
+        var container: YXmlContainer = fragment
+        var element: YXmlElement?
+        for index in path {
+            let count = try transaction.childCount(of: container)
+            guard index >= 0, UInt32(index) < count,
+                  case let .element(child) = try transaction.child(at: UInt32(index), in: container)
+            else { return nil }
+            element = child
+            container = child
+        }
+        return element
+    }
+
+    /// The child-index path of `target` — an element's own path, or for a
+    /// text node the path of the element containing it (a text node has no
+    /// path of its own; its content belongs to its textblock).
+    private func elementPath(of target: YSharedType, in container: YXmlContainer, prefix: [Int], transaction: YReadTransaction) throws -> [Int]? {
+        let count = try transaction.childCount(of: container)
+        for index in 0..<count {
+            switch try transaction.child(at: index, in: container) {
+            case let .element(element):
+                if element == target { return prefix + [Int(index)] }
+                if let found = try elementPath(of: target, in: element, prefix: prefix + [Int(index)], transaction: transaction) {
+                    return found
+                }
+            case let .text(textNode):
+                if textNode == target { return prefix }
+            case .fragment:
+                break
+            }
+        }
+        return nil
+    }
+
     // MARK: - Collaborative undo (CollaborativeUndoController)
 
     /// True while the local peer has a change the YUndoManager can revert. A

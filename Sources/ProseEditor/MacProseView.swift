@@ -14,6 +14,12 @@ import SwiftUI
 
     public let core: EditorCore
     public var pasteboard: Pasteboard = NSPasteboard.general
+    /// Remote collaborators' selections, drawn as Selection Layer chrome
+    /// (caret + range highlight + name label per peer). Geometry recomputes
+    /// on every relayout, so entries stay pinned to their text as it moves.
+    public var remoteSelections: [RemoteSelection] = [] {
+        didSet { updateRemoteSelectionChrome() }
+    }
     let canvasView = MacCanvasView()
     let selectionLayer = MacSelectionLayerView()
     private let editorContentView = MacEditorContentView()
@@ -393,6 +399,11 @@ import SwiftUI
         selectionLayer.caretRect = core.caretRect(for: core.selection.head)
         canvasView.selectionRects = core.selectionRects(for: core.selection)
         canvasView.setWindowIsKey(window?.isKeyWindow ?? true)
+        updateRemoteSelectionChrome()
+    }
+
+    private func updateRemoteSelectionChrome() {
+        selectionLayer.remoteChrome = RemoteSelectionChrome.chrome(for: remoteSelections, core: core)
     }
 
     private func handleMouseDown(_ event: NSEvent) {

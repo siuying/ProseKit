@@ -19,6 +19,36 @@ final class EditorCoreSeamTests: XCTestCase {
         )
     }
 
+    func testDidChangeSelectionFiresOnCaretMoves() {
+        let core = makeCore()
+        var changes: [TextSelection] = []
+        core.didChangeSelection = { changes.append($0) }
+
+        core.setSelection(TextSelection(anchor: 2, head: 2))
+
+        XCTAssertEqual(changes, [TextSelection(anchor: 2, head: 2)])
+    }
+
+    func testDidChangeSelectionDoesNotFireForAnUnchangedSelection() {
+        let core = makeCore()
+        var count = 0
+        core.didChangeSelection = { _ in count += 1 }
+
+        core.setSelection(core.selection)
+
+        XCTAssertEqual(count, 0)
+    }
+
+    func testDidChangeSelectionFiresWhenATransactionMovesTheCaret() throws {
+        let core = makeCore()
+        var changes: [TextSelection] = []
+        core.didChangeSelection = { changes.append($0) }
+
+        try core.insertText("!")
+
+        XCTAssertEqual(changes, [core.selection])
+    }
+
     func testDidApplyFiresOnceForLocalInsert() throws {
         let core = makeCore()
         var applied: [AppliedTransaction] = []
