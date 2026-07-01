@@ -234,14 +234,25 @@ large documents, and more). Open `Example/ProseExample.xcodeproj`, pick an iOS s
 
 ## Testing
 
+ProseKit has two test loops. The fast one runs on the host with `swift test`;
+the UIKit editor tests need an iOS simulator via `xcodebuild`.
+
 ```sh
-# Model tests run on any platform
+# Fast, cross-platform loop: model + Yjs-binding + platform-independent
+# editor tests. Runs on macOS with no simulator.
 swift test
 
-# UIKit-dependent editor tests need a simulator
+# UIKit-dependent editor tests (ProseView / UITextInput) need a simulator.
+# Pin the OS explicitly: more than one "iPhone 17 Pro" can be installed with
+# different iOS versions, and the tests are only validated on the canonical
+# one below.
 xcodebuild test -scheme ProseKit-Package \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.1'
 ```
+
+> **Canonical simulator:** iPhone 17 Pro on **iOS 26.1**. Always pass `OS=` (or
+> a specific `id=`) so the run is reproducible — targeting `name=iPhone 17 Pro`
+> alone can silently pick a different installed OS.
 
 ## License
 
