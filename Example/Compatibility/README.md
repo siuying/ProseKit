@@ -88,10 +88,11 @@ Swift provider doesn't, so the session republishes its state every 10s.
 ## Awareness status
 
 - Random name + color per participant: all peers, shown in every UI. ✅
-- Remote cursors: web↔web only (Tiptap `CollaborationCursor`). ✅
-- Native cursor publishing/rendering: not yet. y-prosemirror encodes cursors
-  as relative positions inside the shared fragment's `YXmlText` nodes, and
-  SwiftYrs currently exposes `relativePosition(in:at:association:)` for
-  `YText` only — once it accepts `YXmlText`, the native side can publish
-  `cursor: {anchor, head}` awareness fields and paint remote carets through
-  the Selection Layer (the plan's Phase 1b).
+- Remote cursors: all directions. ✅ Web peers use Tiptap
+  `CollaborationCursor`; the native session publishes the same
+  `cursor: {anchor, head}` awareness shape (y-prosemirror relative positions,
+  via `YBinding.relativePosition(for:)`) and paints remote peers through the
+  Selection Layer's remote chrome (`ProseView.remoteSelections`, the plan's
+  Phase 1b). `scripts/cursor-probe.mjs` verifies both directions headlessly:
+  it waits for a native cursor, resolves it, and publishes a web cursor for
+  the native apps to draw (`--stay` keeps it alive for screenshots).

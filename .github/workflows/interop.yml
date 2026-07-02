@@ -34,7 +34,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: siuying/SwiftYrs
-          ref: main
+          ref: v0.3.0
           path: SwiftYrs
 
       # No xcode-select: the macos-26 runner default already provides the

@@ -29,6 +29,12 @@ public enum EditorEditAction {
     /// Fires once after each applied Transaction, after `state` is updated.
     public var didApplyTransaction: ((AppliedTransaction) -> Void)?
 
+    /// Fires whenever the Selection changes — a pure caret move through
+    /// `setSelection` (which applies no Transaction) or an applied Transaction
+    /// that moved it. A collaboration session publishes awareness cursors from
+    /// this one seam.
+    public var didChangeSelection: ((TextSelection) -> Void)?
+
     /// The Schema this editor understands. Unknown node/mark types still load
     /// (ADR 0006) but a collaboration binding consults this to preserve them
     /// opaquely rather than reinterpreting them.
@@ -62,6 +68,7 @@ public enum EditorEditAction {
     public var lastTransaction: AppliedTransaction? { state.lastTransaction }
 
     public func setSelection(_ selection: TextSelection) {
+        let previousSelection = state.selection
         // Moving the caret ends any in-progress typing/deleting run so the next
         // edit starts a fresh undo step.
         var history = state.history
@@ -79,6 +86,9 @@ public enum EditorEditAction {
         // undo manager. (The CRDT manager may also split on its own capture
         // timeout, so grouping is close but not identical to solo mode.)
         onUndoCoalescingBreak?()
+        if selection != previousSelection {
+            didChangeSelection?(selection)
+        }
     }
 
     /// Fires when the solo undo history breaks typing coalescing (a caret jump),
@@ -96,6 +106,7 @@ public enum EditorEditAction {
     private func notifyIfApplied(since revision: Int) {
         guard state.revision != revision, let applied = state.lastTransaction else { return }
         didApplyTransaction?(applied)
+        didChangeSelection?(applied.selection)
     }
 
     @discardableResult
