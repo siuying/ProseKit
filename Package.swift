@@ -14,8 +14,8 @@ let package = Package(
         .library(name: "ProseKitYjs", targets: ["ProseKitYjs"]),
     ],
     dependencies: [
-        // Temporarily on the local checkout for the YXmlText inline-formatting API
-        // (siuying/SwiftYrs#98). Restore the pinned version once that merges.
+        // Local sibling checkout should match SwiftYrs v0.3.0; CI checks out
+        // that tag before building the local xcframework.
         .package(path: "../SwiftYrs"),
     ],
     targets: [
